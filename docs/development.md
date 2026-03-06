@@ -157,23 +157,7 @@ uv add --dev <package>
 
 ## Publishing
 
-### PyPI (Python wheel)
-
-```bash
-uvx maturin publish
-```
-
-maturin builds wheels for the target platform and uploads them to PyPI. For multi-platform releases, use maturin's GitHub Actions integration (`PyO3/maturin-action`) to build on each target OS.
-
-The wheel targets `cp312-abi3` (stable ABI), so a single wheel built on a given OS runs on Python 3.12 through 3.x without recompiling.
-
-### crates.io (Rust crate)
-
-```bash
-cargo publish
-```
-
-The crate is `cdylib`-only and not useful as a Rust library dependency, but publishing keeps the crate name reserved.
+See [Release](release.md) for the automated release pipeline and PyPI publishing process.
 
 ---
 
