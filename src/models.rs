@@ -332,9 +332,14 @@ pub enum ResponseStream {
     Async(reqwest::Response),
     Blocking(reqwest::blocking::Response),
 }
-// Neither reqwest::Response nor reqwest::blocking::Response is Sync;
-// we only access them from one thread at a time via Mutex.
-unsafe impl Sync for ResponseStream {}
+
+// Verify that Arc<Mutex<Option<ResponseStream>>> is Sync without any unsafe impl.
+// This holds automatically because reqwest::{Response, blocking::Response} are Send,
+// so ResponseStream: Send, so Mutex<Option<ResponseStream>>: Sync.
+const _: fn() = || {
+    fn assert_sync<T: Sync>() {}
+    assert_sync::<std::sync::Arc<std::sync::Mutex<Option<ResponseStream>>>>();
+};
 
 #[pyclass(name = "Response")]
 pub struct PyResponse {
