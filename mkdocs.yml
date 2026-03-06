@@ -1,0 +1,28 @@
+site_name: httprs
+site_description: An experimental HTTP library for Python built with Rust
+site_url: https://cnpryer.github.io/httprs/
+repo_name: cnpryer/httprs
+repo_url: https://github.com/cnpryer/httprs
+
+theme:
+  name: material
+  palette:
+    scheme: slate
+    primary: deep orange
+    accent: orange
+  features:
+    - navigation.instant
+    - navigation.top
+    - content.code.copy
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - admonition
+
+nav:
+  - Home: index.md
+  - Usage: usage.md
+  - Architecture: architecture.md
+  - Development: development.md

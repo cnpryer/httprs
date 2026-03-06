@@ -1,0 +1,32 @@
+[package]
+name = "httprs"
+version = "0.0.1-alpha.0"
+edition = "2021"
+description = "An experimental HTTP library for Python built with Rust"
+license = "MIT"
+repository = "https://github.com/cnpryer/httprs"
+readme = "README.md"
+keywords = ["http", "client", "python", "pyo3", "async"]
+categories = ["web-programming::http-client", "api-bindings"]
+exclude = ["/tests", "/examples", ".github"]
+
+[lib]
+name = "httprs"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.28.2", features = ["extension-module", "abi3-py312"] }
+pyo3-async-runtimes = { version = "0.28.0", features = ["tokio-runtime"] }
+reqwest = { version = "0.12", features = ["blocking", "json", "cookies", "gzip", "deflate"] }
+tokio = { version = "1", features = ["full"] }
+url = "2"
+serde_json = "1"
+base64 = "0.22"
+md-5 = "0.10"
+sha2 = "0.10"
+hex = "0.4"
+rand = "0.8"
+
+[profile.release]
+lto = true
+codegen-units = 1

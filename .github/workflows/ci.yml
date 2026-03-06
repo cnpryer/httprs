@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  
+  python-test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Installs
+        run: uv sync --locked --all-extras --dev --no-install-project
+
+      - name: Install pip  # TODO(cnpryer): --seed
+        run: uv pip install pip --upgrade
+
+      - name: Build
+        uses: PyO3/maturin-action@v1
+        with:
+          command: develop
+
+      - name: Test
+        run: uv run --no-sync pytest ./tests/ -vv
+    
+  python-check:
+    name: Check Python
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+    
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.14"
+    
+      - name: Installs
+        run: uv sync --locked --all-extras --dev --no-install-project
+    
+      - name: Run lint check
+        run: uv run --no-sync ruff check .
+    
+      - name: Run formatting check
+        run: uv run --no-sync ruff format --preview --check .  # TODO(cnpryer): Consolidated yet?
+
+  rust-check:
+    name: Check Rust
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+    
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+    
+      - uses: Swatinem/rust-cache@v2
+    
+      - name: Run formatting check
+        run: cargo fmt --all --check
+

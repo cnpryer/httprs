@@ -1,0 +1,46 @@
+[project]
+name = "httprs"
+version = "0.0.1a0"
+description = "An experimental HTTP library for Python built with Rust"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { file = "LICENSE" }
+authors = [
+    { name = "cnpryer" },
+]
+keywords = ["http", "client", "rust", "requests", "async"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Rust",
+    "Topic :: Internet :: WWW/HTTP",
+    "Typing :: Typed",
+]
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/cnpryer/httprs"
+Issues = "https://github.com/cnpryer/httprs/issues"
+
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[tool.maturin]
+python-source = "python"
+module-name = "httprs._httprs"
+features = ["pyo3/extension-module"]
+
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.5",
+    "pytest>=8",
+    "anyio[trio]>=4",
+    "pytest-anyio>=0.0.0",
+    "uvicorn>=0.30",
+]
