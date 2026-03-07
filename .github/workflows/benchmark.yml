@@ -36,7 +36,7 @@ jobs:
       - name: Run benchmarks
         id: benchmark
         run: |
-          OUTPUT=$(uv run --no-sync --with httpx --with requests benchmarks.py --packages httpx requests -n 500)
+          OUTPUT=$(uv run --no-sync --with httpx --with requests benchmark.py --packages httpx requests -n 5000)
           echo "output<<EOF" >> "$GITHUB_OUTPUT"
           echo "$OUTPUT" >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
