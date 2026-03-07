@@ -32,16 +32,8 @@ httprs.get("https://postman-echo.com/get").json()
 gh repo clone cnpryer/httprs
 cd httprs
 
-# Install just dependencies and build the project in development mode
-uv sync --all-groups --dev --no-install-project
-uvx maturin develop
-
-# Format and check code
-uv run --no-sync ruff format --preview
-uv run --no-sync ruff check
-cargo fmt
-cargo clippy
-
-# Run tests
-uv run --no-sync pytest ./tests -v
+just sync
+just fmt
+just fix
+just test
 ```

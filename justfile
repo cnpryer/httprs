@@ -1,3 +1,6 @@
+sync:
+    @uv sync --all-groups --dev
+
 fmt:
     @uv run --no-sync ruff format --preview
     @cargo fmt
