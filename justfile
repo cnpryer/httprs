@@ -2,6 +2,9 @@ fmt:
     @uv run --no-sync ruff format --preview
     @cargo fmt
 
+fix:
+    @uv run --no-sync ruff check --fix
+
 test:
     @uv run --no-sync pytest -v
 
