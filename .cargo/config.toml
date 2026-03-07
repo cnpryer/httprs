@@ -1,2 +1,0 @@
-[env]
-CFLAGS_aarch64_unknown_linux_gnu = { value = "-march=armv8-a" }

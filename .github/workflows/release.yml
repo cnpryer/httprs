@@ -11,7 +11,11 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        target: [x86_64, aarch64]
+        include:
+          - target: x86_64
+            args: --release --strip --out dist
+          - target: aarch64
+            args: --release --strip --out dist --zig
     steps:
       - uses: actions/checkout@v4
 
@@ -19,7 +23,7 @@ jobs:
         with:
           target: ${{ matrix.target }}
           command: build
-          args: --release --strip --out dist
+          args: ${{ matrix.args }}
           manylinux: auto
 
       - uses: actions/upload-artifact@v4
