@@ -35,6 +35,8 @@ async def app(scope: Scope, receive: Receive, send: Send) -> None:
         await echo_headers(scope, receive, send)
     elif path.startswith("/redirect_301"):
         await redirect_301(scope, receive, send)
+    elif path.startswith("/redirect_to_private"):
+        await redirect_to_private(scope, receive, send)
     elif path.startswith("/json"):
         await hello_world_json(scope, receive, send)
     elif path.startswith("/digest_auth"):
@@ -126,6 +128,16 @@ async def redirect_301(scope: Scope, receive: Receive, send: Send) -> None:
         "type": "http.response.start",
         "status": 301,
         "headers": [[b"location", b"/"]],
+    })
+    await send({"type": "http.response.body"})
+
+
+async def redirect_to_private(scope: Scope, receive: Receive, send: Send) -> None:
+    """Redirect to a private IP to test SSRF protection."""
+    await send({
+        "type": "http.response.start",
+        "status": 301,
+        "headers": [[b"location", b"http://10.0.0.1/secret"]],
     })
     await send({"type": "http.response.body"})
 

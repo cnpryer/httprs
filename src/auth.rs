@@ -94,9 +94,13 @@ fn parse_digest_challenge(header: &str) -> std::collections::HashMap<String, Str
             remaining = remaining[eq_pos + 1..].trim_start();
             // Find the value (quoted or unquoted)
             let (value, rest) = if let Some(s) = remaining.strip_prefix('"') {
-                // Quoted value
+                // Quoted value — guard against unclosed/single-char strings to prevent panic.
                 let end = s.find('"').map(|i| i + 2).unwrap_or(remaining.len());
-                (remaining[1..end - 1].to_string(), &remaining[end..])
+                let value = remaining
+                    .get(1..end.saturating_sub(1))
+                    .unwrap_or("")
+                    .to_string();
+                (value, &remaining[end..])
             } else {
                 // Unquoted: value is until next comma or end
                 let end = remaining.find(',').unwrap_or(remaining.len());

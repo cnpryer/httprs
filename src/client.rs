@@ -223,6 +223,41 @@ fn parse_timeout_arg(
     }
 }
 
+/// Returns true if `url` resolves to a private, loopback, or link-local address.
+/// Used to block SSRF via open redirects.
+fn is_private_url(url: &url::Url) -> bool {
+    match url.host() {
+        Some(url::Host::Ipv4(addr)) => {
+            addr.is_loopback() || addr.is_private() || addr.is_link_local()
+        }
+        Some(url::Host::Ipv6(addr)) => addr.is_loopback(),
+        Some(url::Host::Domain(host)) => host == "localhost",
+        None => false,
+    }
+}
+
+/// Build a redirect policy. When `block_private` is true, any redirect that
+/// resolves to a private/loopback address is rejected with an error, preventing
+/// SSRF attacks through server-controlled redirects.
+fn make_redirect_policy(follow: bool, block_private: bool) -> reqwest::redirect::Policy {
+    if !follow {
+        return reqwest::redirect::Policy::none();
+    }
+    if block_private {
+        reqwest::redirect::Policy::custom(|attempt| {
+            if is_private_url(attempt.url()) {
+                attempt.error("redirect to private/loopback address blocked (SSRF protection)")
+            } else if attempt.previous().len() >= 20 {
+                attempt.stop()
+            } else {
+                attempt.follow()
+            }
+        })
+    } else {
+        reqwest::redirect::Policy::limited(20)
+    }
+}
+
 #[pyclass(name = "Client")]
 pub struct PyClient {
     inner: Option<reqwest::blocking::Client>,
@@ -231,6 +266,8 @@ pub struct PyClient {
     timeout: PyTimeout,
     #[allow(dead_code)]
     follow_redirects: bool,
+    #[allow(dead_code)]
+    block_private_redirects: bool,
     default_auth: Option<AuthKind>,
 }
 
@@ -267,6 +304,7 @@ impl PyClient {
         follow_redirects = true,
         *,
         http2 = false,
+        block_private_redirects = false,
     ))]
     pub fn new(
         py: Python<'_>,
@@ -276,6 +314,7 @@ impl PyClient {
         auth: Option<Py<PyAny>>,
         follow_redirects: bool,
         http2: bool,
+        block_private_redirects: bool,
     ) -> PyResult<Self> {
         let _ = http2;
         let default_headers = match headers {
@@ -302,11 +341,7 @@ impl PyClient {
             Some(a) => Some(extract_auth(py, &a)?),
         };
 
-        let redirect_policy = if follow_redirects {
-            reqwest::redirect::Policy::limited(20)
-        } else {
-            reqwest::redirect::Policy::none()
-        };
+        let redirect_policy = make_redirect_policy(follow_redirects, block_private_redirects);
 
         let mut client_builder = reqwest::blocking::Client::builder()
             .redirect(redirect_policy)
@@ -326,6 +361,7 @@ impl PyClient {
             default_headers,
             timeout: py_timeout,
             follow_redirects,
+            block_private_redirects,
             default_auth,
         })
     }
@@ -840,6 +876,8 @@ pub struct PyAsyncClient {
     timeout: PyTimeout,
     #[allow(dead_code)]
     follow_redirects: bool,
+    #[allow(dead_code)]
+    block_private_redirects: bool,
 }
 
 impl PyAsyncClient {
@@ -919,6 +957,7 @@ impl PyAsyncClient {
         follow_redirects = true,
         *,
         http2 = false,
+        block_private_redirects = false,
     ))]
     pub fn new(
         py: Python<'_>,
@@ -927,6 +966,7 @@ impl PyAsyncClient {
         timeout: Option<Py<PyAny>>,
         follow_redirects: bool,
         http2: bool,
+        block_private_redirects: bool,
     ) -> PyResult<Self> {
         let _ = http2;
         let default_headers = match headers {
@@ -948,11 +988,7 @@ impl PyAsyncClient {
             }
         };
 
-        let redirect_policy = if follow_redirects {
-            reqwest::redirect::Policy::limited(20)
-        } else {
-            reqwest::redirect::Policy::none()
-        };
+        let redirect_policy = make_redirect_policy(follow_redirects, block_private_redirects);
 
         let mut client_builder = reqwest::Client::builder()
             .redirect(redirect_policy)
@@ -972,6 +1008,7 @@ impl PyAsyncClient {
             default_headers,
             timeout: py_timeout,
             follow_redirects,
+            block_private_redirects,
         })
     }
 
