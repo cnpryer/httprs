@@ -187,3 +187,33 @@ def test_client_closed_raises(server):
     client.close()
     with pytest.raises(RuntimeError):
         client.get(server.url)
+
+
+def test_data_bytes(server):
+    """Regression test for https://github.com/cnpryer/httprs/issues/2.
+
+    Passing io.BytesIO.getvalue() (bytes) as data= raised:
+      TypeError: 'bytes' object is not an instance of 'dict'
+    """
+    import io
+
+    body = io.BytesIO(b"hello world").getvalue()
+    with httprs.Client() as client:
+        response = client.post(server.url + "/echo_body", data=body)
+    assert response.status_code == 200
+    assert response.content == b"hello world"
+
+
+def test_data_dict(server):
+    """data=dict still form-encodes the body."""
+    with httprs.Client() as client:
+        response = client.post(server.url + "/echo_body", data={"key": "value"})
+    assert response.status_code == 200
+    assert response.content == b"key=value"
+
+
+def test_data_invalid_type_raises(server):
+    """data=<invalid type> raises TypeError with a clear message."""
+    with httprs.Client() as client:
+        with pytest.raises(TypeError, match="data must be a dict or bytes"):
+            client.post(server.url, data=[1, 2, 3])
