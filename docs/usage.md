@@ -1,9 +1,9 @@
-# Usage
+# Experimenting with httprs
 
 ## Installation
 
 ```bash
-pip install httprs
+pip install --pre httprs
 ```
 
 Requires Python 3.12+. The wheel bundles the Rust runtime — no separate Rust installation needed at runtime.

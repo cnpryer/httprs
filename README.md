@@ -4,12 +4,12 @@
 
 An experimental HTTP library for Python built with Rust.
 
-## Usage
+## Experimenting with httprs
 
 ### Install
 
 ```bash
-pip install httprs
+pip install --pre httprs
 ```
 
 ### Example
