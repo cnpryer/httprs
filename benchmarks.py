@@ -7,28 +7,31 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 
 class _Handler(BaseHTTPRequestHandler):
+    no_keepalive = False
+
     def log_message(self, format, *args):
         pass  # suppress request logs
 
-    def do_GET(self):
-        body = b"Hello"
+    def _send(self, content_type, body):
         self.send_response(200)
-        self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
+        if self.no_keepalive:
+            self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(body)
+
+    def do_GET(self):
+        self._send("text/plain", b"Hello")
 
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(length) if length else b""
-        self.send_response(200)
-        self.send_header("Content-Type", "application/octet-stream")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        self._send("application/octet-stream", body)
 
 
-def _start_server():
+def _start_server(no_keepalive=False):
+    _Handler.no_keepalive = no_keepalive
     server = HTTPServer(("127.0.0.1", 0), _Handler)
     port = server.server_address[1]
     t = threading.Thread(target=server.serve_forever, daemon=True)
@@ -92,7 +95,7 @@ def _stats(times):
     }
 
 
-def _print_table(results, n):
+def _print_table(results, n, no_keepalive=False):
     benchmarks = ["get", "post_bytes", "post_json", "post_form"]
     packages = list(results.keys())
     comparing = len(packages) > 1
@@ -109,6 +112,9 @@ def _print_table(results, n):
     if comparing:
         col_hdr += "    ratio"
     sep = "  " + "-" * (len(col_hdr) - 2)
+
+    if no_keepalive:
+        print("(no keepalive — new connection per request)")
 
     for bench in benchmarks:
         print(f"\n{bench}  (n={n})")
@@ -157,9 +163,14 @@ def main():
         metavar="N",
         help="iterations per benchmark (default: 200)",
     )
+    parser.add_argument(
+        "--no-keepalive",
+        action="store_true",
+        help="force Connection: close on every response (isolates connection overhead)",
+    )
     args = parser.parse_args()
 
-    base_url = _start_server()
+    base_url = _start_server(no_keepalive=args.no_keepalive)
     print(f"Server running at {base_url}", file=sys.stderr)
 
     all_packages = ["httprs"] + args.packages
@@ -181,7 +192,7 @@ def main():
             times = _run(fn, args.n)
             results[pkg][bench] = _stats(times)
 
-    _print_table(results, args.n)
+    _print_table(results, args.n, no_keepalive=args.no_keepalive)
     print()
 
 
