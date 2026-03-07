@@ -22,7 +22,7 @@ httprs is a Python package distributed as a compiled wheel. The HTTP logic is wr
 
 ### Preliminary results
 
-> Disclaimer: Robust tests have not been conducted. See `benchmarks.py`.
+> Disclaimer: Robust tests have not been conducted. See `benchmark.py`.
 
 Benchmarks on a MacBook Pro M1 Max show httprs ~2.3x faster than httpx and ~3.7x faster than requests.
 

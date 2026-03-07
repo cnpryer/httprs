@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import csv
+import json
+import pathlib
 from datetime import timedelta
 
 import pytest
 import httprs
+
+_INPUT_DIR = pathlib.Path(__file__).parent / "input"
 
 
 def test_context_manager(server):
@@ -215,5 +220,46 @@ def test_data_dict(server):
 def test_data_invalid_type_raises(server):
     """data=<invalid type> raises TypeError with a clear message."""
     with httprs.Client() as client:
-        with pytest.raises(TypeError, match="data must be a dict or bytes"):
+        with pytest.raises(TypeError, match="data must be a dict, bytes, or list"):
             client.post(server.url, data=[1, 2, 3])
+
+
+def test_data_list_of_tuples(server):
+    """data=list-of-tuples form-encodes the body."""
+    with httprs.Client() as client:
+        response = client.post(
+            server.url + "/echo_body", data=[("key", "value"), ("other", "data")]
+        )
+    assert response.status_code == 200
+    assert response.content == b"key=value&other=data"
+
+
+def test_data_list_of_tuples_duplicate_keys(server):
+    """data=list-of-tuples preserves duplicate keys."""
+    with httprs.Client() as client:
+        response = client.post(
+            server.url + "/echo_body", data=[("tag", "a"), ("tag", "b")]
+        )
+    assert response.status_code == 200
+    assert response.content == b"tag=a&tag=b"
+
+
+def test_post_small_json_fixture(server):
+    payload = json.loads((_INPUT_DIR / "small.json").read_bytes())
+    with httprs.Client() as client:
+        response = client.post(server.url + "/echo_body", json=payload)
+    assert response.status_code == 200
+
+
+def test_post_small_csv_fixture(server):
+    pairs = [
+        (row["name"], row["value"])
+        for row in csv.DictReader((_INPUT_DIR / "small.csv").read_text().splitlines())
+    ]
+    with httprs.Client() as client:
+        response = client.post(server.url + "/echo_body", data=pairs)
+    assert response.status_code == 200
+    assert (
+        response.content
+        == b"username=alice&email=alice%40example.com&role=admin&theme=dark&lang=en-US"
+    )

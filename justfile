@@ -13,7 +13,8 @@ test:
 
 bump version:
     @uv run --no-sync bump.py --version {{version}}
+    @uv lock
 
 bench:
     @uvx maturin develop --release
-    @uv run --no-sync --with httpx --with requests benchmarks.py --packages httpx requests -n 200
+    @uv run --no-sync --with httpx --with requests benchmark.py --packages httpx requests -n 5000

@@ -1,9 +1,21 @@
 import argparse
+import csv
+import json
+import pathlib
 import statistics
 import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
+
+_INPUT_DIR = pathlib.Path(__file__).parent / "tests" / "input"
+_BYTES_PAYLOAD: bytes = (_INPUT_DIR / "large.json").read_bytes()
+_JSON_PAYLOAD: object = json.loads(_BYTES_PAYLOAD)
+_FORM_PAYLOAD: list = [
+    (row["name"], row["value"])
+    for row in csv.DictReader((_INPUT_DIR / "large.csv").read_text().splitlines())
+]
+_FORM_PAYLOAD_DICT: dict = dict(_FORM_PAYLOAD)
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -46,9 +58,9 @@ def _make_client(pkg, base_url):
         client = httprs.Client()
         return {
             "get": lambda: client.get(base_url + "/"),
-            "post_bytes": lambda: client.post(base_url + "/", content=b"x" * 256),
-            "post_json": lambda: client.post(base_url + "/", json={"key": "value"}),
-            "post_form": lambda: client.post(base_url + "/", data={"key": "value"}),
+            "post_bytes": lambda: client.post(base_url + "/", content=_BYTES_PAYLOAD),
+            "post_json": lambda: client.post(base_url + "/", json=_JSON_PAYLOAD),
+            "post_form": lambda: client.post(base_url + "/", data=_FORM_PAYLOAD),
         }
     elif pkg == "requests":
         import requests
@@ -56,9 +68,9 @@ def _make_client(pkg, base_url):
         session = requests.Session()
         return {
             "get": lambda: session.get(base_url + "/"),
-            "post_bytes": lambda: session.post(base_url + "/", data=b"x" * 256),
-            "post_json": lambda: session.post(base_url + "/", json={"key": "value"}),
-            "post_form": lambda: session.post(base_url + "/", data={"key": "value"}),
+            "post_bytes": lambda: session.post(base_url + "/", data=_BYTES_PAYLOAD),
+            "post_json": lambda: session.post(base_url + "/", json=_JSON_PAYLOAD),
+            "post_form": lambda: session.post(base_url + "/", data=_FORM_PAYLOAD),
         }
     elif pkg == "httpx":
         import httpx
@@ -66,9 +78,9 @@ def _make_client(pkg, base_url):
         client = httpx.Client()
         return {
             "get": lambda: client.get(base_url + "/"),
-            "post_bytes": lambda: client.post(base_url + "/", content=b"x" * 256),
-            "post_json": lambda: client.post(base_url + "/", json={"key": "value"}),
-            "post_form": lambda: client.post(base_url + "/", data={"key": "value"}),
+            "post_bytes": lambda: client.post(base_url + "/", content=_BYTES_PAYLOAD),
+            "post_json": lambda: client.post(base_url + "/", json=_JSON_PAYLOAD),
+            "post_form": lambda: client.post(base_url + "/", data=_FORM_PAYLOAD_DICT),
         }
     else:
         raise ValueError(f"Unknown package: {pkg}")

@@ -34,18 +34,23 @@ fn build_body(
         if let Ok(bytes) = bound.cast::<pyo3::types::PyBytes>() {
             return Ok(RequestBody::Bytes(bytes.as_bytes().to_vec()));
         }
-        let dict = bound
-            .cast::<pyo3::types::PyDict>()
-            .map_err(|_| pyo3::exceptions::PyTypeError::new_err("data must be a dict or bytes"))?;
-        let pairs: Vec<(String, String)> = dict
-            .iter()
-            .map(|(k, v)| {
-                let key: String = k.extract().unwrap_or_default();
-                let val: String = v.extract().unwrap_or_default();
-                (key, val)
-            })
-            .collect();
-        return Ok(RequestBody::Form(pairs));
+        if let Ok(dict) = bound.cast::<pyo3::types::PyDict>() {
+            let pairs: Vec<(String, String)> = dict
+                .iter()
+                .map(|(k, v)| {
+                    let key: String = k.extract().unwrap_or_default();
+                    let val: String = v.extract().unwrap_or_default();
+                    (key, val)
+                })
+                .collect();
+            return Ok(RequestBody::Form(pairs));
+        }
+        if let Ok(seq) = bound.extract::<Vec<(String, String)>>() {
+            return Ok(RequestBody::Form(seq));
+        }
+        return Err(pyo3::exceptions::PyTypeError::new_err(
+            "data must be a dict, bytes, or list of (str, str) pairs",
+        ));
     }
     Ok(RequestBody::Empty)
 }
