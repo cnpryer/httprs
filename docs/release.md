@@ -37,11 +37,15 @@ All wheels use the `abi3-py312` stable ABI tag, so a single wheel per platform r
    ```
    uv run --no-sync bump.py --version 0.0.1a0
    ```
-2. Commit:
+2. Update `CHANGELOG.md`:
+   - Rename `[Unreleased]` to the new version with today's date (e.g. `[0.0.1a0] - YYYY-MM-DD`).
+   - Add a new empty `[Unreleased]` section at the top.
+   - Add a comparison link at the bottom for the new version.
+3. Commit:
    ```
    git commit -am "Release v0.0.1a0"
    ```
-3. Tag and push:
+4. Tag and push:
    ```
    git tag v0.0.1a0
    git push origin main v0.0.1a0
