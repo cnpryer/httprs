@@ -28,12 +28,22 @@ httprs.get("https://postman-echo.com/get").json()
 
 ## Development
 
-```bash
+```
 gh repo clone cnpryer/httprs
 cd httprs
+```
 
+Use `just` to run development tasks:
+
+```
 just sync
 just fmt
 just fix
 just test
 ```
+
+### Tools
+
+- [just](https://github.com/casey/just)
+- [uv](https://github.com/astral-sh/uv)
+- [rustup](https://rustup.rs/)
