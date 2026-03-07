@@ -24,38 +24,38 @@ httprs is a Python package distributed as a compiled wheel. The HTTP logic is wr
 
 > Disclaimer: Robust tests have not been conducted. See `benchmarks.py`.
 
-On a MacBook Pro M1 Max, preliminary benchmarks show httprs is ~2.2x faster than httpx and ~3.7x faster than requests on a variety of common request types.
+Benchmarks on a MacBook Pro M1 Max show httprs ~2.3x faster than httpx and ~3.7x faster than requests.
 
-No conclusions should be drawn from these results until robust testing is completed. **This project is experimental and not ready for production use.**
+These loopback tests measure overhead only. Real networks are latency bound. Experimental, not production ready.
 
 ```
 get  (n=10000)
   package      mean   median    stdev      min      max  (ms)    ratio
   --------------------------------------------------------------------
-  httprs      0.130    0.128    0.098    0.093    9.534
-  httpx       0.291    0.275    0.207    0.263   12.659    2.23x slower
-  requests    0.489    0.494    0.467    0.407   34.744    3.75x slower
+  httprs      0.131    0.129    0.057    0.092    5.667
+  httpx       0.309    0.283    0.199    0.248   12.549    2.37x slower
+  requests    0.500    0.495    0.320    0.391   16.877    3.83x slower
 
 post_bytes  (n=10000)
   package      mean   median    stdev      min      max  (ms)    ratio
   --------------------------------------------------------------------
-  httprs      0.134    0.133    0.114    0.101   11.293
-  httpx       0.306    0.293    0.183    0.278   10.336    2.28x slower
-  requests    0.504    0.493    0.419    0.414   26.584    3.77x slower
+  httprs      0.134    0.133    0.082    0.107    8.245
+  httpx       0.325    0.305    0.172    0.279    9.664    2.42x slower
+  requests    0.505    0.495    0.353    0.462   16.414    3.76x slower
 
 post_json  (n=10000)
   package      mean   median    stdev      min      max  (ms)    ratio
   --------------------------------------------------------------------
-  httprs      0.142    0.140    0.178    0.110   17.876
-  httpx       0.319    0.308    0.181    0.288   10.038    2.25x slower
-  requests    0.514    0.500    0.352    0.461   16.916    3.62x slower
+  httprs      0.144    0.141    0.209    0.097   15.847
+  httpx       0.323    0.309    0.180    0.288    9.279    2.24x slower
+  requests    0.513    0.502    0.345    0.466   16.376    3.57x slower
 
 post_form  (n=10000)
   package      mean   median    stdev      min      max  (ms)    ratio
   --------------------------------------------------------------------
-  httprs      0.142    0.137    0.261    0.108   19.032
-  httpx       0.322    0.309    0.202    0.281   12.841    2.27x slower
-  requests    0.513    0.503    0.309    0.467   16.525    3.62x slower
+  httprs      0.138    0.137    0.164    0.086   16.439
+  httpx       0.322    0.309    0.157    0.287    9.191    2.33x slower
+  requests    0.516    0.505    0.348    0.462   16.228    3.73x slower
 ```
 
 ## Quick start
