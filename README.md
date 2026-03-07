@@ -22,6 +22,6 @@ httprs.get("https://postman-echo.com/get").json()
 - Fast
 - Open
 
-# Documentation
+## Documentation
 
 📚 [Documentation](https://cnpryer.github.io/httprs/)
