@@ -18,3 +18,6 @@ bump version:
 bench:
     @uvx maturin develop --release
     @uv run --no-sync --with httpx --with requests benchmark.py --packages httpx requests -n 5000
+
+ecosystem *args:
+    @uv run --no-sync python check_ecosystem.py {{args}}
