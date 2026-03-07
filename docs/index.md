@@ -16,7 +16,7 @@ httprs is a Python package distributed as a compiled wheel. The HTTP logic is wr
 
 ## Plan
 
-1. >99% tested and measured parity with httpx and requests on core API usage.
+1. \>99% tested and measured parity with httpx and requests on core API usage.
 2. Continuously benchmark against popular HTTP libraries with full transparency.
 3. Minimize complexity and create an intuitive and inviting experience for developers.
 
