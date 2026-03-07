@@ -29,6 +29,8 @@ jobs:
 
   windows:
     runs-on: windows-latest
+    env:
+      PYO3_CROSS_PYTHON_VERSION: "3.12"
     strategy:
       matrix:
         target: [x86_64, aarch64]
