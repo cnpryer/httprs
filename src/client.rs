@@ -31,7 +31,12 @@ fn build_body(
     }
     if let Some(data_obj) = data {
         let bound = data_obj.bind(py);
-        let dict = bound.cast::<pyo3::types::PyDict>()?;
+        if let Ok(bytes) = bound.cast::<pyo3::types::PyBytes>() {
+            return Ok(RequestBody::Bytes(bytes.as_bytes().to_vec()));
+        }
+        let dict = bound
+            .cast::<pyo3::types::PyDict>()
+            .map_err(|_| pyo3::exceptions::PyTypeError::new_err("data must be a dict or bytes"))?;
         let pairs: Vec<(String, String)> = dict
             .iter()
             .map(|(k, v)| {
