@@ -13,6 +13,7 @@ test:
 
 bump version:
     @uv run --no-sync bump.py --version {{version}}
+    @uv lock
 
 bench:
     @uvx maturin develop --release
