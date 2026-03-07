@@ -228,7 +228,7 @@ fn parse_timeout_arg(
 fn is_private_url(url: &url::Url) -> bool {
     match url.host() {
         Some(url::Host::Ipv4(addr)) => {
-            addr.is_loopback() || addr.is_private() || addr.is_link_local()
+            addr.is_loopback() || addr.is_private() || addr.is_link_local() || addr.is_unspecified()
         }
         Some(url::Host::Ipv6(addr)) => {
             addr.is_loopback()

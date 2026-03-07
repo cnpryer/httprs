@@ -60,3 +60,10 @@ def test_ssrf_redirect_to_ipv6_link_local_is_blocked(server):
     with httprs.Client(follow_redirects=True, block_private_redirects=True) as client:
         with pytest.raises(httprs.RequestError):
             client.get(server.url + "/redirect_to_ipv6_private")
+
+
+def test_ssrf_redirect_to_unspecified_address_is_blocked(server):
+    """block_private_redirects must block redirects to 0.0.0.0 (unspecified address)."""
+    with httprs.Client(follow_redirects=True, block_private_redirects=True) as client:
+        with pytest.raises(httprs.RequestError):
+            client.get(server.url + "/redirect_to_unspecified")

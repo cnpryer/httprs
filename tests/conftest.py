@@ -39,6 +39,8 @@ async def app(scope: Scope, receive: Receive, send: Send) -> None:
         await redirect_to_private(scope, receive, send)
     elif path.startswith("/redirect_to_ipv6_private"):
         await redirect_to_ipv6_private(scope, receive, send)
+    elif path.startswith("/redirect_to_unspecified"):
+        await redirect_to_unspecified(scope, receive, send)
     elif path.startswith("/json"):
         await hello_world_json(scope, receive, send)
     elif path.startswith("/digest_auth"):
@@ -150,6 +152,16 @@ async def redirect_to_ipv6_private(scope: Scope, receive: Receive, send: Send) -
         "type": "http.response.start",
         "status": 301,
         "headers": [[b"location", b"http://[fe80::1]/secret"]],
+    })
+    await send({"type": "http.response.body"})
+
+
+async def redirect_to_unspecified(scope: Scope, receive: Receive, send: Send) -> None:
+    """Redirect to 0.0.0.0 to test SSRF protection bypass via unspecified address."""
+    await send({
+        "type": "http.response.start",
+        "status": 301,
+        "headers": [[b"location", b"http://0.0.0.0/secret"]],
     })
     await send({"type": "http.response.body"})
 
