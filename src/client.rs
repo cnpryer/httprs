@@ -232,8 +232,13 @@ fn is_private_url(url: &url::Url) -> bool {
         }
         Some(url::Host::Ipv6(addr)) => {
             addr.is_loopback()
+                || addr.is_unspecified()
                 || (addr.segments()[0] & 0xffc0 == 0xfe80) // link-local fe80::/10
                 || (addr.segments()[0] & 0xfe00 == 0xfc00) // unique-local fc00::/7
+                || (addr.segments()[0] & 0xff00 == 0xff00) // multicast ff00::/8
+                || addr.to_ipv4_mapped().map_or(false, |v4| {
+                    v4.is_loopback() || v4.is_private() || v4.is_link_local() || v4.is_unspecified()
+                })
         }
         Some(url::Host::Domain(host)) => host == "localhost",
         None => false,

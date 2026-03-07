@@ -41,6 +41,12 @@ async def app(scope: Scope, receive: Receive, send: Send) -> None:
         await redirect_to_ipv6_private(scope, receive, send)
     elif path.startswith("/redirect_to_unspecified"):
         await redirect_to_unspecified(scope, receive, send)
+    elif path.startswith("/redirect_to_ipv4_mapped_loopback"):
+        await redirect_to_ipv4_mapped_loopback(scope, receive, send)
+    elif path.startswith("/redirect_to_ipv4_mapped_private"):
+        await redirect_to_ipv4_mapped_private(scope, receive, send)
+    elif path.startswith("/redirect_to_ipv6_unspecified"):
+        await redirect_to_ipv6_unspecified(scope, receive, send)
     elif path.startswith("/json"):
         await hello_world_json(scope, receive, send)
     elif path.startswith("/digest_auth"):
@@ -162,6 +168,42 @@ async def redirect_to_unspecified(scope: Scope, receive: Receive, send: Send) ->
         "type": "http.response.start",
         "status": 301,
         "headers": [[b"location", b"http://0.0.0.0/secret"]],
+    })
+    await send({"type": "http.response.body"})
+
+
+async def redirect_to_ipv4_mapped_loopback(
+    scope: Scope, receive: Receive, send: Send
+) -> None:
+    """Redirect to ::ffff:127.0.0.1 to test IPv4-mapped IPv6 SSRF protection."""
+    await send({
+        "type": "http.response.start",
+        "status": 301,
+        "headers": [[b"location", b"http://[::ffff:127.0.0.1]/secret"]],
+    })
+    await send({"type": "http.response.body"})
+
+
+async def redirect_to_ipv4_mapped_private(
+    scope: Scope, receive: Receive, send: Send
+) -> None:
+    """Redirect to ::ffff:10.0.0.1 to test IPv4-mapped IPv6 SSRF protection."""
+    await send({
+        "type": "http.response.start",
+        "status": 301,
+        "headers": [[b"location", b"http://[::ffff:10.0.0.1]/secret"]],
+    })
+    await send({"type": "http.response.body"})
+
+
+async def redirect_to_ipv6_unspecified(
+    scope: Scope, receive: Receive, send: Send
+) -> None:
+    """Redirect to :: (IPv6 unspecified) to test SSRF protection."""
+    await send({
+        "type": "http.response.start",
+        "status": 301,
+        "headers": [[b"location", b"http://[::]/secret"]],
     })
     await send({"type": "http.response.body"})
 
