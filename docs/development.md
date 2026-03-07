@@ -76,9 +76,9 @@ uv run --no-sync pytest ./tests -vv
 
 ```bash
 # Python
-uv run --no-sync ruff format --preview        # format
-uv run --no-sync ruff check         # lint
-uv run --no-sync ruff check --fix   # lint + autofix
+uv run --no-sync ruff format --preview   # format
+uv run --no-sync ruff check              # lint
+uv run --no-sync ruff check --fix        # lint + autofix
 
 # Rust
 cargo fmt                           # format
