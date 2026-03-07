@@ -13,7 +13,11 @@ bump version:
 
 bench:
     @uv run \
-      --no-sync \
-      --with httpx \
-      --with requests \
-      benchmarks.py --packages httpx requests
+    --no-sync \
+    --with httpx \
+    --with requests \
+    benchmarks.py \
+    --packages \
+    httpx \
+    requests \
+    -n 200
