@@ -160,6 +160,12 @@ To add a dev dependency:
 uv add --dev <package>
 ```
 
+Newer versions of `uv` likely support `[dependency-groups]` tables in `pyproject.toml` files.
+
+```bash
+uv add --group dev <package>
+```
+
 ---
 
 ## Publishing
