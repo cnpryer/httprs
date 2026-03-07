@@ -230,7 +230,11 @@ fn is_private_url(url: &url::Url) -> bool {
         Some(url::Host::Ipv4(addr)) => {
             addr.is_loopback() || addr.is_private() || addr.is_link_local()
         }
-        Some(url::Host::Ipv6(addr)) => addr.is_loopback(),
+        Some(url::Host::Ipv6(addr)) => {
+            addr.is_loopback()
+                || (addr.segments()[0] & 0xffc0 == 0xfe80) // link-local fe80::/10
+                || (addr.segments()[0] & 0xfe00 == 0xfc00) // unique-local fc00::/7
+        }
         Some(url::Host::Domain(host)) => host == "localhost",
         None => false,
     }
