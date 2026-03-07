@@ -1,6 +1,6 @@
 [project]
 name = "httprs"
-version = "0.0.1a1"
+version = "0.0.1a2"
 description = "An experimental HTTP library for Python built with Rust"
 readme = "README.md"
 requires-python = ">=3.12"
