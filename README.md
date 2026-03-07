@@ -24,4 +24,4 @@ httprs.get("https://postman-echo.com/get").json()
 
 ## Documentation
 
-📚 [Documentation](https://cnpryer.github.io/httprs/)
+📚 Link: https://cnpryer.github.io/httprs/
