@@ -81,8 +81,8 @@ uv run --no-sync ruff check              # lint
 uv run --no-sync ruff check --fix        # lint + autofix
 
 # Rust
-cargo fmt                           # format
-cargo clippy                        # lint
+cargo fmt      # format
+cargo clippy   # lint
 ```
 
 CI enforces `ruff format --preview --check` and `cargo fmt --check` on every PR.

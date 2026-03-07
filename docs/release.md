@@ -34,15 +34,15 @@ All wheels use the `abi3-py312` stable ABI tag, so a single wheel per platform r
 ## Cutting a release
 
 1. Bump the version in both `Cargo.toml` and `pyproject.toml` to the same value (e.g. `0.0.1a0`).
-   ```bash
+   ```
    uv run --no-sync bump.py --version 0.0.1a0
    ```
 2. Commit:
-   ```bash
+   ```
    git commit -am "Release v0.0.1a0"
    ```
 3. Tag and push:
-   ```bash
+   ```
    git tag v0.0.1a0
    git push origin main v0.0.1a0
    ```
