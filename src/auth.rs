@@ -115,6 +115,10 @@ fn parse_digest_challenge(header: &str) -> std::collections::HashMap<String, Str
     map
 }
 
+fn escape_digest_value(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
 fn md5_hex(input: &str) -> String {
     let mut hasher = Md5::new();
     hasher.update(input.as_bytes());
@@ -217,10 +221,10 @@ impl PyDigestAuth {
 
         // Build Authorization header
         let mut parts = vec![
-            format!("username=\"{}\"", self.username),
-            format!("realm=\"{}\"", realm),
-            format!("nonce=\"{}\"", nonce),
-            format!("uri=\"{}\"", uri),
+            format!("username=\"{}\"", escape_digest_value(&self.username)),
+            format!("realm=\"{}\"", escape_digest_value(&realm)),
+            format!("nonce=\"{}\"", escape_digest_value(&nonce)),
+            format!("uri=\"{}\"", escape_digest_value(uri)),
         ];
 
         if algorithm != "MD5" {
@@ -231,14 +235,14 @@ impl PyDigestAuth {
             if q.contains("auth") {
                 parts.push("qop=auth".to_string());
                 parts.push(format!("nc={}", nc));
-                parts.push(format!("cnonce=\"{}\"", cnonce));
+                parts.push(format!("cnonce=\"{}\"", escape_digest_value(&cnonce)));
             }
         }
 
         parts.push(format!("response=\"{}\"", response_hash));
 
         if let Some(op) = opaque {
-            parts.push(format!("opaque=\"{}\"", op));
+            parts.push(format!("opaque=\"{}\"", escape_digest_value(&op)));
         }
 
         Ok(format!("Digest {}", parts.join(", ")))

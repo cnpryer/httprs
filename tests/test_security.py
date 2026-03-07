@@ -34,3 +34,29 @@ def test_digest_single_char_quoted_value_does_not_panic():
     auth = httprs.DigestAuth(username="u", password="p")
     result = auth.compute_header("GET", "/", 'Digest realm="')
     assert result.startswith("Digest ")
+
+
+def test_digest_header_injection_username_with_quote():
+    """Username containing a double-quote must be escaped, not injected."""
+    auth = httprs.DigestAuth(username='admin", injected="evil', password="pass")
+    www_auth = 'Digest realm="test", qop="auth", nonce="abc123"'
+    header = auth.compute_header("GET", "/path", www_auth)
+    assert header.startswith("Digest ")
+    # Without escaping the header would contain the unescaped `, injected="evil"` as
+    # a real field. With proper escaping the quotes around "evil" are backslash-escaped.
+    assert ', injected="evil"' not in header
+
+
+def test_digest_header_username_quote_is_escaped():
+    """Double-quote in username must appear as \" (backslash-escaped) in the header."""
+    auth = httprs.DigestAuth(username='foo"bar', password="pass")
+    www_auth = 'Digest realm="test", nonce="abc123"'
+    header = auth.compute_header("GET", "/path", www_auth)
+    assert 'username="foo\\"bar"' in header
+
+
+def test_ssrf_redirect_to_ipv6_link_local_is_blocked(server):
+    """block_private_redirects must block redirects to IPv6 link-local addresses."""
+    with httprs.Client(follow_redirects=True, block_private_redirects=True) as client:
+        with pytest.raises(httprs.RequestError):
+            client.get(server.url + "/redirect_to_ipv6_private")
