@@ -11,15 +11,22 @@
 ```bash
 gh repo clone cnpryer/httprs
 cd httprs
-
-# Install Python dev dependencies (no project install yet)
-uv sync --all-groups --dev --no-install-project
-
-# Compile the Rust extension and install it in editable mode
-uvx maturin develop
 ```
 
-After `maturin develop`, `import httprs` works from the repo root using the compiled `.so` in `python/httprs/`.
+Use `just` to run development tasks:
+
+```
+just sync
+just fmt
+just fix
+just test
+```
+
+## Tools
+
+- [just](https://github.com/casey/just)
+- [uv](https://github.com/astral-sh/uv)
+- [rustup](https://rustup.rs/)
 
 ---
 

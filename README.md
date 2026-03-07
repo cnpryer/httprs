@@ -1,6 +1,6 @@
 # httprs
 
-> **Disclaimer:** This project is under active development and is not ready for use. Do not use this project at this time.
+> **Status:** Pre-alpha. Not ready for production use.
 
 An experimental HTTP library for Python built with Rust.
 
@@ -26,24 +26,4 @@ httprs.get("https://postman-echo.com/get").json()
 - Fast
 - Open
 
-## Development
-
-```
-gh repo clone cnpryer/httprs
-cd httprs
-```
-
-Use `just` to run development tasks:
-
-```
-just sync
-just fmt
-just fix
-just test
-```
-
-### Tools
-
-- [just](https://github.com/casey/just)
-- [uv](https://github.com/astral-sh/uv)
-- [rustup](https://rustup.rs/)
+📚 [Documentation](https://cnpryer.github.io/httprs/)
