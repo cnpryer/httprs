@@ -1,0 +1,962 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="An experimental HTTP library for Python built with Rust">
+      
+      
+      
+        <link rel="canonical" href="https://cnpryer.github.io/httprs/architecture/">
+      
+      
+        <link rel="prev" href="../usage/">
+      
+      
+        <link rel="next" href="../development/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.4">
+    
+    
+      
+        <title>Architecture - httprs</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="deep-orange" data-md-color-accent="orange">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#architecture" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="httprs" class="md-header__button md-logo" aria-label="httprs" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            httprs
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Architecture
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/cnpryer/httprs" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    cnpryer/httprs
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="httprs" class="md-nav__button md-logo" aria-label="httprs" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    httprs
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/cnpryer/httprs" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    cnpryer/httprs
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../usage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Usage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#build-system" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Build system
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rust-module-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rust module structure
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Rust module structure">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#srclibrs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        src/lib.rs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#srcclientrs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        src/client.rs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#srcmodelsrs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        src/models.rs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#srcauthrs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        src/auth.rs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#srcconfigrs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        src/config.rs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#python-layer-pythonhttprs__init__py" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Python layer (python/httprs/__init__.py)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gil-management" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GIL management
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#asyncsync-interop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Async/sync interop
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#error-mapping" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Error mapping
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../development/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../release/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#build-system" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Build system
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rust-module-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rust module structure
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Rust module structure">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#srclibrs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        src/lib.rs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#srcclientrs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        src/client.rs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#srcmodelsrs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        src/models.rs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#srcauthrs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        src/auth.rs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#srcconfigrs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        src/config.rs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#python-layer-pythonhttprs__init__py" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Python layer (python/httprs/__init__.py)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gil-management" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GIL management
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#asyncsync-interop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Async/sync interop
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#error-mapping" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Error mapping
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="architecture">Architecture</h1>
+<h2 id="overview">Overview</h2>
+<p>httprs is a Python extension module. The Rust crate compiles to a shared library (<code>_httprs.abi3.so</code>) that Python imports directly. A thin Python layer re-exports symbols and adds Python-specific conveniences.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>Python caller
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>     |
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>     v
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>httprs/__init__.py          (Python: re-exports, convenience wrappers)
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>     |
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>     v
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>httprs/_httprs.abi3.so      (Rust extension, compiled by maturin)
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>     |
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>     v
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>reqwest + tokio             (Rust HTTP + async runtime)
+</code></pre></div>
+<hr />
+<h2 id="build-system">Build system</h2>
+<p><a href="https://www.maturin.rs/">maturin</a> is the build backend. It compiles the Rust crate and packages the resulting <code>.so</code> alongside the Python source in a wheel.</p>
+<p>Key configuration in <code>pyproject.toml</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">[tool.maturin]</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">python-source</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;python&quot;</span><span class="w">        </span><span class="c1"># Python package root</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="n">module-name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;httprs._httprs&quot;</span><span class="w">  </span><span class="c1"># Import path of the extension</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="n">features</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;pyo3/extension-module&quot;</span><span class="p">]</span>
+</code></pre></div>
+<p>The <code>abi3-py312</code> feature in <code>Cargo.toml</code> produces a stable ABI wheel (<code>cp312-abi3</code>) that runs on Python 3.12+:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">pyo3</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">version</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;0.28.2&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">features</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;extension-module&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;abi3-py312&quot;</span><span class="p">]</span><span class="w"> </span><span class="p">}</span>
+</code></pre></div>
+<hr />
+<h2 id="rust-module-structure">Rust module structure</h2>
+<h3 id="srclibrs"><code>src/lib.rs</code></h3>
+<p>Entry point for the PyO3 module. Responsibilities:</p>
+<ul>
+<li>Declares the exception hierarchy using <code>create_exception!</code></li>
+<li>Registers all classes and exceptions in the <code>_httprs</code> module via <code>#[pymodule]</code></li>
+<li>Provides three shared utilities used across modules:</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Symbol</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>sync_runtime()</code></td>
+<td>Returns a lazily-initialized <code>tokio::runtime::Runtime</code> (multi-thread) used by <code>PyClient</code> to drive async reqwest internally</td>
+</tr>
+<tr>
+<td><code>run_blocking(fut)</code></td>
+<td>Spawns a future on <code>SYNC_RUNTIME</code> and blocks the calling thread via a channel — used for streaming response reads</td>
+</tr>
+<tr>
+<td><code>without_gil(f)</code></td>
+<td>Releases the Python GIL while executing a blocking closure (<code>PyEval_SaveThread</code> / <code>PyEval_RestoreThread</code>)</td>
+</tr>
+<tr>
+<td><code>map_reqwest_error(e)</code></td>
+<td>Maps <code>reqwest::Error</code> variants to the appropriate Python exception subclass</td>
+</tr>
+</tbody>
+</table>
+<h3 id="srcclientrs"><code>src/client.rs</code></h3>
+<p>Contains three pyclass types:</p>
+<p><strong><code>PyClient</code> (exposed as <code>Client</code>)</strong></p>
+<ul>
+<li>Wraps <code>reqwest::blocking::Client</code></li>
+<li><code>request()</code> is the core method; all HTTP verb methods delegate to it</li>
+<li>GIL is released during I/O via <code>without_gil(|| builder.send())</code></li>
+<li>Digest auth uses a two-pass strategy: sends unauthenticated, checks for 401, then retries with computed <code>Authorization</code> header</li>
+<li><code>stream()</code> returns a <code>PyStreamContext</code></li>
+<li>Implements <code>__enter__</code>/<code>__exit__</code> for use as a context manager</li>
+<li><code>close()</code> drops the inner client by setting <code>inner = None</code></li>
+</ul>
+<p><strong><code>PyStreamContext</code> (exposed as <code>StreamContext</code>)</strong></p>
+<ul>
+<li>Created by <code>Client.stream()</code>; implements <code>__enter__</code>/<code>__exit__</code></li>
+<li><code>__enter__</code> sends the request and returns a <code>PyResponse</code> whose body is backed by a live <code>reqwest::blocking::Response</code> (wrapped in <code>Arc&lt;Mutex&lt;Option&lt;ResponseStream&gt;&gt;&gt;</code>)</li>
+<li><code>__exit__</code> drops the response to close the connection</li>
+</ul>
+<p><strong><code>PyAsyncClient</code> (exposed as <code>AsyncClient</code>)</strong></p>
+<ul>
+<li>Wraps <code>reqwest::Client</code> (async)</li>
+<li>Each request method calls <code>pyo3_async_runtimes::tokio::future_into_py</code> to bridge the Rust future into a Python awaitable</li>
+<li>Implements <code>__aenter__</code>/<code>__aexit__</code></li>
+<li>Does not currently support <code>data</code> (form bodies) or <code>DigestAuth</code></li>
+</ul>
+<h3 id="srcmodelsrs"><code>src/models.rs</code></h3>
+<p><strong><code>PyURL</code></strong> — Thin wrapper around <code>url::Url</code>. All URL parsing/validation occurs in Rust.</p>
+<p><strong><code>PyHeaders</code></strong> — Stores <code>Vec&lt;(String, String)&gt;</code> with lowercase names. Accepts <code>dict</code>, <code>list[tuple]</code>, or any Python iterable of 2-tuples. Implements <code>__getitem__</code>, <code>__contains__</code>, <code>__iter__</code>, <code>__len__</code>.</p>
+<p><strong><code>PyRequest</code></strong> — Holds method (uppercased), URL, headers, and raw content bytes. Used by <code>Client.build_request()</code> / <code>Client.send()</code>.</p>
+<p><strong><code>PyResponse</code></strong> — Holds all response metadata and either an eager body (<code>Vec&lt;u8&gt;</code>) or a lazy stream (<code>Arc&lt;Mutex&lt;Option&lt;ResponseStream&gt;&gt;&gt;</code>). <code>read()</code>, <code>iter_bytes()</code>, and <code>iter_text()</code> drain the stream. JSON parsing is done via <code>serde_json</code> in Rust, then converted to Python objects recursively by <code>json_to_python</code>.</p>
+<p><strong><code>ResponseStream</code></strong> — Enum wrapping either <code>reqwest::blocking::Response</code> or <code>reqwest::Response</code>. Shared via <code>Arc&lt;Mutex&lt;Option&lt;...&gt;&gt;&gt;</code> between <code>PyStreamContext</code> and <code>PyResponse</code>. Marked <code>unsafe impl Sync</code> because access is serialized through the <code>Mutex</code>.</p>
+<h3 id="srcauthrs"><code>src/auth.rs</code></h3>
+<p><strong><code>PyBasicAuth</code></strong> — Precomputes the <code>Authorization: Basic &lt;base64&gt;</code> header value at construction time.</p>
+<p><strong><code>PyDigestAuth</code></strong> — Implements RFC 7616 Digest authentication. On <code>compute_header()</code>:
+1. Parses the <code>WWW-Authenticate: Digest ...</code> challenge
+2. Computes HA1 = hash(username:realm:password), HA2 = hash(method:uri)
+3. Computes response hash per qop mode (<code>auth</code> or legacy)
+4. Supports MD5 (default) and SHA-256 algorithms
+5. Tracks nonce count in <code>Mutex&lt;DigestState&gt;</code> for replay protection</p>
+<p>Both types are subclassed in Python (<code>python/httprs/__init__.py</code>) to add <code>sync_auth_flow</code> and <code>async_auth_flow</code> generator protocols.</p>
+<h3 id="srcconfigrs"><code>src/config.rs</code></h3>
+<p><strong><code>PyTimeout</code></strong> — Stores <code>connect</code>, <code>read</code>, <code>write</code>, and <code>pool</code> timeouts as <code>Option&lt;f64&gt;</code> seconds. A single positional argument sets all four simultaneously.</p>
+<p><strong><code>PyLimits</code></strong> — Configuration type for connection pool limits. Stored but not yet wired into the client builder.</p>
+<hr />
+<h2 id="python-layer-pythonhttprs__init__py">Python layer (<code>python/httprs/__init__.py</code>)</h2>
+<p>The Python file does four things:</p>
+<ol>
+<li><strong>Re-exports</strong> all Rust types from <code>httprs._httprs</code> into the <code>httprs</code> namespace</li>
+<li><strong>Subclasses</strong> <code>BasicAuth</code> and <code>DigestAuth</code> to add <code>sync_auth_flow</code> / <code>async_auth_flow</code> generator protocols (for potential middleware-style auth flows)</li>
+<li><strong>Defines <code>codes</code></strong> — an <code>IntEnum</code> with all standard HTTP status codes and classification helpers</li>
+<li><strong>Defines convenience functions</strong> — <code>get</code>, <code>post</code>, <code>put</code>, <code>patch</code>, <code>delete</code>, <code>head</code>, <code>options</code>, <code>request</code>, <code>stream</code> — each creates a temporary <code>Client</code> and tears it down</li>
+</ol>
+<hr />
+<h2 id="gil-management">GIL management</h2>
+<p>Because <code>reqwest::blocking</code> uses a dedicated OS thread pool internally, blocking on I/O while holding the GIL would prevent other Python threads from running. Every blocking call releases the GIL:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1">// In client.rs — any blocking send</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="kd">let</span><span class="w"> </span><span class="n">result</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">crate</span><span class="p">::</span><span class="n">without_gil</span><span class="p">(</span><span class="o">||</span><span class="w"> </span><span class="n">builder</span><span class="p">.</span><span class="n">send</span><span class="p">());</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="c1">// In models.rs — reading the response body</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="kd">let</span><span class="w"> </span><span class="n">content</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">crate</span><span class="p">::</span><span class="n">without_gil</span><span class="p">(</span><span class="o">||</span><span class="w"> </span><span class="n">resp</span><span class="p">.</span><span class="n">bytes</span><span class="p">())</span>
+</code></pre></div>
+<p><code>without_gil</code> is a safe wrapper around the unsafe <code>PyEval_SaveThread</code> / <code>PyEval_RestoreThread</code> FFI pair. It must only be called from a <code>#[pymethods]</code> function while the GIL is held.</p>
+<hr />
+<h2 id="asyncsync-interop">Async/sync interop</h2>
+<p><code>PyClient</code> uses <code>reqwest::blocking</code> which does its own internal async execution. It does <strong>not</strong> use <code>SYNC_RUNTIME</code> for normal requests. <code>SYNC_RUNTIME</code> is reserved for cases where an async future must be driven from a synchronous <code>#[pymethods]</code> context — currently used only in <code>Response.read()</code> when the underlying stream is an async <code>reqwest::Response</code>.</p>
+<p><code>PyAsyncClient</code> uses <code>pyo3_async_runtimes::tokio::future_into_py</code>, which hooks into the tokio runtime managed by <code>pyo3-async-runtimes</code>. This is a separate runtime from <code>SYNC_RUNTIME</code>.</p>
+<hr />
+<h2 id="error-mapping">Error mapping</h2>
+<p><code>map_reqwest_error</code> in <code>lib.rs</code> converts <code>reqwest::Error</code> to the Python exception hierarchy:</p>
+<table>
+<thead>
+<tr>
+<th>reqwest error kind</th>
+<th>Python exception</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>is_timeout()</code></td>
+<td><code>TimeoutException</code></td>
+</tr>
+<tr>
+<td><code>is_redirect()</code></td>
+<td><code>TooManyRedirects</code></td>
+</tr>
+<tr>
+<td><code>is_connect()</code></td>
+<td><code>ConnectError</code></td>
+</tr>
+<tr>
+<td><code>is_builder()</code></td>
+<td><code>UnsupportedProtocol</code></td>
+</tr>
+<tr>
+<td><code>is_request()</code></td>
+<td><code>UnsupportedProtocol</code></td>
+</tr>
+<tr>
+<td><code>is_body()</code> / <code>is_decode()</code></td>
+<td><code>ReadError</code></td>
+</tr>
+<tr>
+<td>other</td>
+<td><code>RequestError</code></td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.top", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

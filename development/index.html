@@ -1,0 +1,1434 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="An experimental HTTP library for Python built with Rust">
+      
+      
+      
+        <link rel="canonical" href="https://cnpryer.github.io/httprs/development/">
+      
+      
+        <link rel="prev" href="../architecture/">
+      
+      
+        <link rel="next" href="../release/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.4">
+    
+    
+      
+        <title>Development - httprs</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="deep-orange" data-md-color-accent="orange">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#development" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="httprs" class="md-header__button md-logo" aria-label="httprs" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            httprs
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Development
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/cnpryer/httprs" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    cnpryer/httprs
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="httprs" class="md-nav__button md-logo" aria-label="httprs" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    httprs
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/cnpryer/httprs" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    cnpryer/httprs
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../usage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Usage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tools
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#build" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Build
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Build">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#development-build-fast-no-optimizations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Development build (fast, no optimizations)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#release-build-lto-single-codegen-unit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Release build (LTO + single codegen unit)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#running-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running tests
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ecosystem-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ecosystem tests
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Ecosystem tests">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scripts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scripts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#target-repos" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Target repos
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#quick-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quick start
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#how-it-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How it works
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#auto-excluded-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Auto-excluded tests
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#known-gaps-covered-by-the-shim" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Known gaps covered by the shim
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cli-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CLI reference
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#linting-and-formatting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Linting and formatting
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ci" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CI
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#making-changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Making changes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Making changes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#adding-a-new-python-visible-method-to-an-existing-class" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adding a new Python-visible method to an existing class
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#adding-a-new-exception" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adding a new exception
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#adding-a-new-top-level-class" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adding a new top-level class
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changing-the-python-package-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changing the Python package structure
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dependency-management" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dependency management
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Dependency management">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#rust" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rust
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#python" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Python
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#publishing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Publishing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#key-invariants-to-maintain" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Key invariants to maintain
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../release/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tools
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#build" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Build
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Build">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#development-build-fast-no-optimizations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Development build (fast, no optimizations)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#release-build-lto-single-codegen-unit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Release build (LTO + single codegen unit)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#running-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running tests
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ecosystem-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ecosystem tests
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Ecosystem tests">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scripts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scripts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#target-repos" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Target repos
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#quick-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quick start
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#how-it-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How it works
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#auto-excluded-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Auto-excluded tests
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#known-gaps-covered-by-the-shim" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Known gaps covered by the shim
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cli-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CLI reference
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#linting-and-formatting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Linting and formatting
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ci" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CI
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#making-changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Making changes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Making changes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#adding-a-new-python-visible-method-to-an-existing-class" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adding a new Python-visible method to an existing class
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#adding-a-new-exception" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adding a new exception
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#adding-a-new-top-level-class" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adding a new top-level class
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changing-the-python-package-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changing the Python package structure
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dependency-management" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dependency management
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Dependency management">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#rust" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rust
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#python" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Python
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#publishing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Publishing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#key-invariants-to-maintain" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Key invariants to maintain
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="development">Development</h1>
+<h2 id="prerequisites">Prerequisites</h2>
+<ul>
+<li>Rust stable toolchain (<code>rustup</code>)</li>
+<li><a href="https://github.com/astral-sh/uv">uv</a> (Python package manager)</li>
+<li>Python 3.12+</li>
+</ul>
+<h2 id="setup">Setup</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>gh<span class="w"> </span>repo<span class="w"> </span>clone<span class="w"> </span>cnpryer/httprs
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nb">cd</span><span class="w"> </span>httprs
+</code></pre></div>
+<p>Use <code>just</code> to run development tasks:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>just sync
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>just fmt
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>just fix
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>just test
+</code></pre></div>
+<h2 id="tools">Tools</h2>
+<ul>
+<li><a href="https://github.com/casey/just">just</a></li>
+<li><a href="https://github.com/astral-sh/uv">uv</a></li>
+<li><a href="https://rustup.rs/">rustup</a></li>
+</ul>
+<hr />
+<h2 id="build">Build</h2>
+<h3 id="development-build-fast-no-optimizations">Development build (fast, no optimizations)</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>uvx<span class="w"> </span>maturin<span class="w"> </span>develop
+</code></pre></div>
+<h3 id="release-build-lto-single-codegen-unit">Release build (LTO + single codegen unit)</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>uvx<span class="w"> </span>maturin<span class="w"> </span>develop<span class="w"> </span>--release
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="c1"># or build a wheel:</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>uvx<span class="w"> </span>maturin<span class="w"> </span>build<span class="w"> </span>--release
+</code></pre></div>
+<p>The release profile in <code>Cargo.toml</code> enables <code>lto = true</code> and <code>codegen-units = 1</code> for maximum performance.</p>
+<hr />
+<h2 id="running-tests">Running tests</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>uv<span class="w"> </span>run<span class="w"> </span>--no-sync<span class="w"> </span>pytest<span class="w"> </span>./tests<span class="w"> </span>-v
+</code></pre></div>
+<p>Tests spin up a local ASGI server (uvicorn + a hand-written ASGI app in <code>tests/conftest.py</code>) on an ephemeral port. The server fixture is session-scoped, so it starts once per test run.</p>
+<p>Run a specific test file:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>uv<span class="w"> </span>run<span class="w"> </span>--no-sync<span class="w"> </span>pytest<span class="w"> </span>tests/test_client.py<span class="w"> </span>-v
+</code></pre></div>
+<p>Run with extra verbosity (shows captured output):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>uv<span class="w"> </span>run<span class="w"> </span>--no-sync<span class="w"> </span>pytest<span class="w"> </span>./tests<span class="w"> </span>-vv
+</code></pre></div>
+<hr />
+<h2 id="ecosystem-tests">Ecosystem tests</h2>
+<p>Ecosystem tests measure real-world httpx API compatibility by cloning third-party repos, running their test suites twice — once against real httpx (baseline) and once with httprs substituted via a compatibility shim — and reporting which tests regress.</p>
+<h3 id="scripts">Scripts</h3>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>check_ecosystem.py</code></td>
+<td>Main orchestrator: clones repos, manages venvs, runs pytest, prints report</td>
+</tr>
+<tr>
+<td><code>httpx_compat.py</code></td>
+<td>httpx → httprs compatibility shim (injected as <code>sys.modules["httpx"]</code>)</td>
+</tr>
+<tr>
+<td><code>ecosystem_conftest.py</code></td>
+<td>pytest plugin that activates the shim and converts transport-stub errors to skips</td>
+</tr>
+</tbody>
+</table>
+<h3 id="target-repos">Target repos</h3>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Repo</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>anthropic</code></td>
+<td><code>anthropics/anthropic-sdk-python</code></td>
+</tr>
+<tr>
+<td><code>openai</code></td>
+<td><code>openai/openai-python</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="quick-start">Quick start</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># Build the extension first</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>uvx<span class="w"> </span>maturin<span class="w"> </span>develop
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="c1"># Smoke test: one repo, no baseline, short timeout</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>just<span class="w"> </span>ecosystem<span class="w"> </span>--repos<span class="w"> </span>openai<span class="w"> </span>--no-baseline<span class="w"> </span>--timeout<span class="w"> </span><span class="m">120</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="c1"># Full baseline vs. experiment comparison</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>just<span class="w"> </span>ecosystem<span class="w"> </span>-v
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="c1"># Skip the build step with a pre-built wheel</span>
+<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a>just<span class="w"> </span>ecosystem<span class="w"> </span>--httprs-wheel<span class="w"> </span>target/wheels/httprs-*.whl
+</code></pre></div>
+<h3 id="how-it-works">How it works</h3>
+<ol>
+<li><strong>Clone</strong> each repo at the pinned ref (reuses existing checkouts unless <code>--clean</code>)</li>
+<li><strong>Create <code>.venv-ecosystem</code></strong> inside the checkout, install the repo's dev dependencies plus the httprs wheel</li>
+<li><strong>Baseline run</strong>: pytest with real httpx (no shim)</li>
+<li><strong>Experiment run</strong>: pytest with <code>ecosystem_conftest.py</code> injected via <code>-p _httprs_compat</code>, which replaces <code>sys.modules["httpx"]</code> with the shim before any test modules are imported</li>
+<li><strong>Diff</strong>: <code>regressions = experiment_failing − baseline_failing</code>; always exits with code <code>0</code> (report only)</li>
+</ol>
+<h3 id="auto-excluded-tests">Auto-excluded tests</h3>
+<p>Tests that use unsupported transports are automatically converted to skips rather than failures:</p>
+<ul>
+<li><strong>ASGI/WSGI transports</strong> (<code>ASGITransport</code>, <code>WSGITransport</code>): the shim stubs raise <code>NotImplementedError</code> on instantiation; the conftest plugin catches this and marks the test skipped</li>
+<li><strong>Mock libraries</strong> (<code>respx</code>, <code>pytest-httpx</code>): these patch httpx internals; <code>AttributeError</code>s from accessing <code>httpx._*</code> internals are caught and skipped</li>
+<li><strong>Live API tests</strong> (<code>tests/api_resources/</code>): both SDKs' <code>api_resources</code> directories make real network calls; excluded via <code>--ignore=tests/api_resources</code></li>
+</ul>
+<h3 id="known-gaps-covered-by-the-shim">Known gaps covered by the shim</h3>
+<table>
+<thead>
+<tr>
+<th>httpx feature</th>
+<th>Shim approach</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>params=</code> kwarg on all request methods</td>
+<td><code>_append_query_params()</code> prepends to URL before forwarding</td>
+</tr>
+<tr>
+<td><code>response.history</code></td>
+<td><code>Response</code> proxy wraps <code>httprs.Response</code> and adds <code>history = []</code></td>
+</tr>
+<tr>
+<td><code>httpx.codes.OK</code> etc.</td>
+<td>Re-exported from <code>httprs.codes</code> (IntEnum)</td>
+</tr>
+<tr>
+<td><code>from httpx._models import …</code></td>
+<td>Fake submodules registered in <code>sys.modules</code></td>
+</tr>
+<tr>
+<td><code>PoolTimeout</code>, <code>InvalidURL</code>, …</td>
+<td>Aliased to nearest httprs exception</td>
+</tr>
+<tr>
+<td><code>isinstance(client, httpx.Client)</code></td>
+<td><code>Client</code> inherits from real <code>httpx.Client</code> (captured before shim injection)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="cli-reference">CLI reference</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>just ecosystem [options]
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a># or: python check_ecosystem.py [options]
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>  --checkouts-dir PATH   Directory for repo checkouts (default: /tmp/httprs-ecosystem)
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>  --repos REPO …         Subset to run: openai, anthropic (default: all)
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>  --httprs-wheel PATH    Use a pre-built wheel instead of running maturin build
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>  --no-baseline          Skip the httpx baseline; only report httprs pass/fail counts
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>  --clean                Wipe existing checkouts before cloning
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>  --timeout SECONDS      Per-repo pytest timeout (default: 600)
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>  --concurrency N        Max repos processed in parallel (default: 2)
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>  -v, --verbose          Print all failing test IDs
+</code></pre></div>
+<hr />
+<h2 id="linting-and-formatting">Linting and formatting</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># Python</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>uv<span class="w"> </span>run<span class="w"> </span>--no-sync<span class="w"> </span>ruff<span class="w"> </span>format<span class="w"> </span>--preview<span class="w">   </span><span class="c1"># format</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>uv<span class="w"> </span>run<span class="w"> </span>--no-sync<span class="w"> </span>ruff<span class="w"> </span>check<span class="w">              </span><span class="c1"># lint</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>uv<span class="w"> </span>run<span class="w"> </span>--no-sync<span class="w"> </span>ruff<span class="w"> </span>check<span class="w"> </span>--fix<span class="w">        </span><span class="c1"># lint + autofix</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="c1"># Rust</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>cargo<span class="w"> </span>fmt<span class="w">      </span><span class="c1"># format</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>cargo<span class="w"> </span>clippy<span class="w">   </span><span class="c1"># lint</span>
+</code></pre></div>
+<p>CI enforces <code>ruff format --preview --check</code> and <code>cargo fmt --check</code> on every PR.</p>
+<hr />
+<h2 id="ci">CI</h2>
+<p>Defined in <code>.github/workflows/ci.yml</code>. Three jobs:</p>
+<table>
+<thead>
+<tr>
+<th>Job</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>python-test</code></td>
+<td>Builds the extension with maturin, runs pytest on Ubuntu and Windows with Python 3.12</td>
+</tr>
+<tr>
+<td><code>python-check</code></td>
+<td>Runs <code>ruff check</code> and <code>ruff format --preview --check</code> on Python 3.14</td>
+</tr>
+<tr>
+<td><code>rust-check</code></td>
+<td>Runs <code>cargo fmt --check</code></td>
+</tr>
+</tbody>
+</table>
+<p>CI triggers on push to <code>main</code> and on all pull requests.</p>
+<hr />
+<h2 id="making-changes">Making changes</h2>
+<h3 id="adding-a-new-python-visible-method-to-an-existing-class">Adding a new Python-visible method to an existing class</h3>
+<ol>
+<li>Add the method to the relevant <code>impl</code> block in the appropriate <code>src/*.rs</code> file</li>
+<li>Annotate it with <code>#[pyo3(signature = (...))]</code> to define the Python calling convention</li>
+<li>Run <code>uvx maturin develop</code> to recompile</li>
+<li>Add tests in <code>tests/</code></li>
+</ol>
+<p>Example — adding <code>Client.trace()</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1">// src/client.rs, inside #[pymethods] impl PyClient</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="cp">#[pyo3(signature = (url, *, content = None, json = None, data = None, headers = None, auth = None, timeout = None, follow_redirects = None))]</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="k">pub</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="nf">trace</span><span class="p">(</span><span class="o">&amp;</span><span class="bp">self</span><span class="p">,</span><span class="w"> </span><span class="n">py</span><span class="p">:</span><span class="w"> </span><span class="nc">Python</span><span class="o">&lt;&#39;</span><span class="nb">_</span><span class="o">&gt;</span><span class="p">,</span><span class="w"> </span><span class="n">url</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="kt">str</span><span class="p">,</span><span class="w"> </span><span class="o">..</span><span class="p">.)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nc">PyResult</span><span class="o">&lt;</span><span class="n">PyResponse</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="w">    </span><span class="bp">self</span><span class="p">.</span><span class="n">request</span><span class="p">(</span><span class="n">py</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;TRACE&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">url</span><span class="p">,</span><span class="w"> </span><span class="o">..</span><span class="p">.)</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="p">}</span>
+</code></pre></div>
+<p>If the method also needs to be accessible as a top-level function, add it to <code>python/httprs/__init__.py</code>.</p>
+<h3 id="adding-a-new-exception">Adding a new exception</h3>
+<ol>
+<li>Add <code>create_exception!(httprs, MyError, ParentError, "doc string.");</code> in <code>src/lib.rs</code></li>
+<li>Register it in <code>_httprs()</code>: <code>m.add("MyError", m.py().get_type::&lt;MyError&gt;())?;</code></li>
+<li>Re-export from <code>python/httprs/__init__.py</code></li>
+<li>Add to <code>map_reqwest_error</code> if it should be raised automatically from reqwest errors</li>
+</ol>
+<h3 id="adding-a-new-top-level-class">Adding a new top-level class</h3>
+<ol>
+<li>Create a <code>#[pyclass]</code> struct in the appropriate <code>src/*.rs</code> file</li>
+<li>Implement <code>#[pymethods]</code> for it</li>
+<li>Add <code>m.add_class::&lt;YourClass&gt;()?;</code> in <code>_httprs()</code> in <code>src/lib.rs</code></li>
+<li>Re-export from <code>python/httprs/__init__.py</code> and add to <code>__all__</code></li>
+</ol>
+<h3 id="changing-the-python-package-structure">Changing the Python package structure</h3>
+<p>The Python source root is <code>python/</code> (configured via <code>[tool.maturin] python-source = "python"</code>). The extension module is placed at <code>httprs._httprs</code> (<code>module-name = "httprs._httprs"</code>). Do not move these without updating both <code>pyproject.toml</code> and <code>python/httprs/__init__.py</code>.</p>
+<hr />
+<h2 id="dependency-management">Dependency management</h2>
+<h3 id="rust">Rust</h3>
+<p>Add dependencies to <code>Cargo.toml</code>. Prefer features on existing crates over new crates. After adding, run <code>cargo build</code> to update <code>Cargo.lock</code>.</p>
+<h3 id="python">Python</h3>
+<p>Dev dependencies are in <code>[dependency-groups] dev</code> in <code>pyproject.toml</code>. httprs has no runtime Python dependencies (<code>dependencies = []</code>).</p>
+<p>To add a dev dependency:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>uv<span class="w"> </span>add<span class="w"> </span>--dev<span class="w"> </span>&lt;package&gt;
+</code></pre></div>
+<p>Newer versions of <code>uv</code> likely support <code>[dependency-groups]</code> tables in <code>pyproject.toml</code> files.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>uv<span class="w"> </span>add<span class="w"> </span>--group<span class="w"> </span>dev<span class="w"> </span>&lt;package&gt;
+</code></pre></div>
+<hr />
+<h2 id="publishing">Publishing</h2>
+<p>See <a href="../release/">Release</a> for the automated release pipeline and PyPI publishing process.</p>
+<hr />
+<h2 id="key-invariants-to-maintain">Key invariants to maintain</h2>
+<ul>
+<li>
+<p><strong>GIL must be released during all blocking I/O.</strong> Any <code>builder.send()</code>, <code>resp.bytes()</code>, or similar call must be wrapped in <code>crate::without_gil(|| ...)</code>. Failing to do this will deadlock when a local Python server (e.g., the test server) needs to run on the same thread.</p>
+</li>
+<li>
+<p><strong><code>without_gil</code> must only be called while holding the GIL.</strong> It is not safe to call from a spawned thread or from inside another <code>without_gil</code> closure.</p>
+</li>
+<li>
+<p><strong><code>ResponseStream</code> uses <code>unsafe impl Sync</code>.</strong> This is sound because the <code>Mutex</code> ensures exclusive access. Do not share <code>ResponseStream</code> without the mutex.</p>
+</li>
+<li>
+<p><strong><code>run_blocking</code> spawns on <code>SYNC_RUNTIME</code>.</strong> Do not use it from an async context (deadlock risk). It is only for driving async futures from synchronous <code>#[pymethods]</code>.</p>
+</li>
+<li>
+<p><strong>Header names are lowercased at ingestion.</strong> <code>PyHeaders::from_pyobject</code>, <code>from_reqwest</code>, and <code>from_vec</code> all lowercase keys. Methods that accept a key (<code>get</code>, <code>__getitem__</code>, <code>__contains__</code>) also lowercase before comparison. Maintain this invariant for any new header code.</p>
+</li>
+<li>
+<p><strong>The Python <code>BasicAuth</code>/<code>DigestAuth</code> subclasses shadow the Rust classes in <code>__init__.py</code>.</strong> The Rust base classes are imported as <code>_BasicAuth</code>/<code>_DigestAuth</code> and the Python subclasses replace them. If a new auth type is added to Rust, follow the same pattern.</p>
+</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.top", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
