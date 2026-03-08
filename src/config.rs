@@ -26,7 +26,14 @@ pub struct PyTimeout {
 #[pymethods]
 impl PyTimeout {
     #[new]
-    #[pyo3(signature = (timeout = None, *, connect = None, read = None, write = None, pool = None))]
+    #[pyo3(signature = (
+        timeout = None,
+        *,
+        connect = None,
+        read = None,
+        write = None,
+        pool = None,
+    ))]
     pub fn new(
         timeout: Option<f64>,
         connect: Option<f64>,
@@ -91,7 +98,12 @@ pub struct PyLimits {
 #[pymethods]
 impl PyLimits {
     #[new]
-    #[pyo3(signature = (*, max_connections = None, max_keepalive_connections = None, keepalive_expiry = Some(5.0)))]
+    #[pyo3(signature = (
+        *,
+        max_connections = None,
+        max_keepalive_connections = None,
+        keepalive_expiry = Some(5.0),
+    ))]
     pub fn new(
         max_connections: Option<usize>,
         max_keepalive_connections: Option<usize>,

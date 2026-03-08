@@ -257,59 +257,6 @@ fn build_blocking_request(
     Ok(builder)
 }
 
-fn build_async_request(
-    client: &reqwest::Client,
-    method: &str,
-    url: &str,
-    extra_headers: Option<&PyHeaders>,
-    default_headers: &PyHeaders,
-    body: RequestBody,
-    auth: Option<&AuthKind>,
-    timeout: Option<Duration>,
-) -> PyResult<reqwest::RequestBuilder> {
-    let method = reqwest::Method::from_bytes(method.to_uppercase().as_bytes())
-        .map_err(|_| PyValueError::new_err(format!("Invalid HTTP method: {}", method)))?;
-
-    let mut builder = client.request(method, url);
-
-    for (k, v) in &default_headers.inner {
-        builder = builder.header(k.as_str(), v.as_str());
-    }
-    if let Some(h) = extra_headers {
-        for (k, v) in &h.inner {
-            builder = builder.header(k.as_str(), v.as_str());
-        }
-    }
-
-    match body {
-        RequestBody::Empty => {}
-        RequestBody::Bytes(bytes) => {
-            builder = builder.body(bytes);
-        }
-        RequestBody::Json(json_str) => {
-            builder = builder
-                .header("content-type", "application/json")
-                .body(json_str.into_bytes());
-        }
-        RequestBody::Form(pairs) => {
-            let encoded = form_encode_pairs(&pairs);
-            builder = builder
-                .header("content-type", "application/x-www-form-urlencoded")
-                .body(encoded.into_bytes());
-        }
-    }
-
-    if let Some(AuthKind::Basic(header_val)) = auth {
-        builder = builder.header("authorization", header_val.as_str());
-    }
-
-    if let Some(dur) = timeout {
-        builder = builder.timeout(dur);
-    }
-
-    Ok(builder)
-}
-
 fn timeout_duration(timeout: &PyTimeout) -> Option<Duration> {
     timeout.read.map(Duration::from_secs_f64)
 }
@@ -644,7 +591,17 @@ impl PyClient {
         }
     }
 
-    #[pyo3(signature = (url, *, content = None, json = None, data = None, headers = None, auth = None, timeout = None, follow_redirects = None))]
+    #[pyo3(signature = (
+        url,
+        *,
+        content = None,
+        json = None,
+        data = None,
+        headers = None,
+        auth = None,
+        timeout = None,
+        follow_redirects = None,
+    ))]
     pub fn get(
         &self,
         py: Python<'_>,
@@ -671,7 +628,17 @@ impl PyClient {
         )
     }
 
-    #[pyo3(signature = (url, *, content = None, json = None, data = None, headers = None, auth = None, timeout = None, follow_redirects = None))]
+    #[pyo3(signature = (
+        url,
+        *,
+        content = None,
+        json = None,
+        data = None,
+        headers = None,
+        auth = None,
+        timeout = None,
+        follow_redirects = None,
+    ))]
     pub fn post(
         &self,
         py: Python<'_>,
@@ -698,7 +665,17 @@ impl PyClient {
         )
     }
 
-    #[pyo3(signature = (url, *, content = None, json = None, data = None, headers = None, auth = None, timeout = None, follow_redirects = None))]
+    #[pyo3(signature = (
+        url,
+        *,
+        content = None,
+        json = None,
+        data = None,
+        headers = None,
+        auth = None,
+        timeout = None,
+        follow_redirects = None,
+    ))]
     pub fn put(
         &self,
         py: Python<'_>,
@@ -725,7 +702,17 @@ impl PyClient {
         )
     }
 
-    #[pyo3(signature = (url, *, content = None, json = None, data = None, headers = None, auth = None, timeout = None, follow_redirects = None))]
+    #[pyo3(signature = (
+        url,
+        *,
+        content = None,
+        json = None,
+        data = None,
+        headers = None,
+        auth = None,
+        timeout = None,
+        follow_redirects = None,
+    ))]
     pub fn patch(
         &self,
         py: Python<'_>,
@@ -752,7 +739,17 @@ impl PyClient {
         )
     }
 
-    #[pyo3(signature = (url, *, content = None, json = None, data = None, headers = None, auth = None, timeout = None, follow_redirects = None))]
+    #[pyo3(signature = (
+        url,
+        *,
+        content = None,
+        json = None,
+        data = None,
+        headers = None,
+        auth = None,
+        timeout = None,
+        follow_redirects = None,
+    ))]
     pub fn delete(
         &self,
         py: Python<'_>,
@@ -779,7 +776,14 @@ impl PyClient {
         )
     }
 
-    #[pyo3(signature = (url, *, headers = None, auth = None, timeout = None, follow_redirects = None))]
+    #[pyo3(signature = (
+        url,
+        *,
+        headers = None,
+        auth = None,
+        timeout = None,
+        follow_redirects = None,
+    ))]
     pub fn head(
         &self,
         py: Python<'_>,
@@ -803,7 +807,14 @@ impl PyClient {
         )
     }
 
-    #[pyo3(signature = (url, *, headers = None, auth = None, timeout = None, follow_redirects = None))]
+    #[pyo3(signature = (
+        url,
+        *,
+        headers = None,
+        auth = None,
+        timeout = None,
+        follow_redirects = None,
+    ))]
     pub fn options(
         &self,
         py: Python<'_>,
@@ -828,7 +839,19 @@ impl PyClient {
     }
 
     /// Build a Request object without sending it.
-    #[pyo3(signature = (method, url, *, content = None, json = None, data = None, files = None, headers = None, params = None, timeout = None, extensions = None))]
+    #[pyo3(signature = (
+        method,
+        url,
+        *,
+        content = None,
+        json = None,
+        data = None,
+        files = None,
+        headers = None,
+        params = None,
+        timeout = None,
+        extensions = None,
+    ))]
     pub fn build_request(
         &self,
         py: Python<'_>,
@@ -933,7 +956,13 @@ impl PyClient {
     }
 
     /// Send a pre-built Request.
-    #[pyo3(signature = (request, *, stream = false, auth = None, follow_redirects = None))]
+    #[pyo3(signature = (
+        request,
+        *,
+        stream = false,
+        auth = None,
+        follow_redirects = None,
+    ))]
     pub fn send<'py>(
         slf: &Bound<'py, Self>,
         py: Python<'py>,
@@ -992,7 +1021,17 @@ impl PyClient {
     }
 
     /// Return a context manager for streaming the response.
-    #[pyo3(signature = (method, url, *, content = None, json = None, data = None, headers = None, auth = None, timeout = None))]
+    #[pyo3(signature = (
+        method,
+        url,
+        *,
+        content = None,
+        json = None,
+        data = None,
+        headers = None,
+        auth = None,
+        timeout = None,
+    ))]
     pub fn stream(
         &self,
         py: Python<'_>,
@@ -1384,7 +1423,15 @@ impl PyAsyncClient {
         })
     }
 
-    #[pyo3(signature = (url, *, content = None, json = None, headers = None, auth = None, timeout = None))]
+    #[pyo3(signature = (
+        url,
+        *,
+        content = None,
+        json = None,
+        headers = None,
+        auth = None,
+        timeout = None,
+    ))]
     pub fn get<'py>(
         &self,
         py: Python<'py>,
@@ -1407,7 +1454,15 @@ impl PyAsyncClient {
         )
     }
 
-    #[pyo3(signature = (url, *, content = None, json = None, headers = None, auth = None, timeout = None))]
+    #[pyo3(signature = (
+        url,
+        *,
+        content = None,
+        json = None,
+        headers = None,
+        auth = None,
+        timeout = None,
+    ))]
     pub fn post<'py>(
         &self,
         py: Python<'py>,
@@ -1430,7 +1485,15 @@ impl PyAsyncClient {
         )
     }
 
-    #[pyo3(signature = (url, *, content = None, json = None, headers = None, auth = None, timeout = None))]
+    #[pyo3(signature = (
+        url,
+        *,
+        content = None,
+        json = None,
+        headers = None,
+        auth = None,
+        timeout = None,
+    ))]
     pub fn put<'py>(
         &self,
         py: Python<'py>,
@@ -1453,7 +1516,15 @@ impl PyAsyncClient {
         )
     }
 
-    #[pyo3(signature = (url, *, content = None, json = None, headers = None, auth = None, timeout = None))]
+    #[pyo3(signature = (
+        url,
+        *,
+        content = None,
+        json = None,
+        headers = None,
+        auth = None,
+        timeout = None,
+    ))]
     pub fn patch<'py>(
         &self,
         py: Python<'py>,
@@ -1476,7 +1547,15 @@ impl PyAsyncClient {
         )
     }
 
-    #[pyo3(signature = (url, *, content = None, json = None, headers = None, auth = None, timeout = None))]
+    #[pyo3(signature = (
+        url,
+        *,
+        content = None,
+        json = None,
+        headers = None,
+        auth = None,
+        timeout = None,
+    ))]
     pub fn delete<'py>(
         &self,
         py: Python<'py>,
@@ -1541,7 +1620,19 @@ impl PyAsyncClient {
         )
     }
 
-    #[pyo3(signature = (method, url, *, content = None, json = None, data = None, files = None, headers = None, params = None, timeout = None, extensions = None))]
+    #[pyo3(signature = (
+        method,
+        url,
+        *,
+        content = None,
+        json = None,
+        data = None,
+        files = None,
+        headers = None,
+        params = None,
+        timeout = None,
+        extensions = None,
+    ))]
     pub fn build_request(
         &self,
         py: Python<'_>,
@@ -1644,7 +1735,13 @@ impl PyAsyncClient {
         )
     }
 
-    #[pyo3(signature = (request, *, stream = false, auth = None, follow_redirects = None))]
+    #[pyo3(signature = (
+        request,
+        *,
+        stream = false,
+        auth = None,
+        follow_redirects = None,
+    ))]
     pub fn send<'py>(
         slf: &Bound<'py, Self>,
         py: Python<'py>,

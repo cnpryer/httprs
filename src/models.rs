@@ -236,7 +236,17 @@ impl PyURL {
     }
 
     /// Return a copy with specified components replaced.
-    #[pyo3(signature = (*, scheme = None, host = None, port = None, path = None, query = None, fragment = None, raw_path = None, params = None))]
+    #[pyo3(signature = (
+        *,
+        scheme = None,
+        host = None,
+        port = None,
+        path = None,
+        query = None,
+        fragment = None,
+        raw_path = None,
+        params = None,
+    ))]
     pub fn copy_with(
         &self,
         py: Python<'_>,
@@ -566,7 +576,14 @@ impl Clone for PyRequest {
 #[pymethods]
 impl PyRequest {
     #[new]
-    #[pyo3(signature = (method, url, *, headers = None, content = None, extensions = None))]
+    #[pyo3(signature = (
+        method,
+        url,
+        *,
+        headers = None,
+        content = None,
+        extensions = None,
+    ))]
     pub fn new(
         py: Python<'_>,
         method: &str,
@@ -894,7 +911,21 @@ impl PyResponse {
 impl PyResponse {
     /// Construct a Response directly (for testing / manual use).
     #[new]
-    #[pyo3(signature = (status_code = 200, *, content = None, text = None, html = None, json = None, stream = None, headers = None, request = None, extensions = None, history = None, default_encoding = None, http_version = None))]
+    #[pyo3(signature = (
+        status_code = 200,
+        *,
+        content = None,
+        text = None,
+        html = None,
+        json = None,
+        stream = None,
+        headers = None,
+        request = None,
+        extensions = None,
+        history = None,
+        default_encoding = None,
+        http_version = None,
+    ))]
     pub fn new(
         py: Python<'_>,
         status_code: u16,
