@@ -119,7 +119,6 @@ class RepoDiff:
     experiment: TestOutcome
     regressions: list[str]
     pre_existing: list[str]
-    improvements: list[str]
 
 
 async def _run(
@@ -416,7 +415,6 @@ def _compute_diff(
         experiment=experiment,
         regressions=sorted(e_fail - b_fail),
         pre_existing=sorted(b_fail & e_fail),
-        improvements=sorted(b_fail - e_fail),
     )
 
 
@@ -486,7 +484,6 @@ async def _process_repo(
                     experiment=experiment,
                     regressions=[],
                     pre_existing=[],
-                    improvements=[],
                 )
 
             if args.verbose:
@@ -548,6 +545,14 @@ def _print_counts(label: str, run: str, outcome: TestOutcome, verbose: bool) -> 
     )
 
 
+def _format_regression_rate(regressions: int, baseline: TestOutcome) -> str:
+    """Format regressions as count + percentage of baseline-passing tests."""
+    if baseline.passed <= 0:
+        return f"{regressions} (n/a)"
+    pct = (regressions / baseline.passed) * 100.0
+    return f"{regressions} ({pct:.1f}%)"
+
+
 def _format_report(diffs: list[RepoDiff], args: argparse.Namespace) -> tuple[str, int]:
     lines: list[str] = []
     today = datetime.date.today().isoformat()
@@ -589,6 +594,10 @@ def _format_report(diffs: list[RepoDiff], args: argparse.Namespace) -> tuple[str
                 b = getattr(diff.baseline, stat)
                 e = getattr(diff.experiment, stat)
                 lines.append(f"| {stat} | {b} | {e} |")
+            lines.append(
+                f"| remaining regressions | - | "
+                f"{_format_regression_rate(len(diff.regressions), diff.baseline)} |"
+            )
 
         lines.append("")
 
@@ -605,13 +614,6 @@ def _format_report(diffs: list[RepoDiff], args: argparse.Namespace) -> tuple[str
                         lines.append(f"- {t}")
                 lines.append("")
 
-        if diff.improvements and args.verbose:
-            n = len(diff.improvements)
-            lines.append(f"#### Improvements ({n} test{'s' if n != 1 else ''})")
-            for t in diff.improvements:
-                lines.append(f"- {t}")
-            lines.append("")
-
         if not args.no_baseline and diff.pre_existing and args.verbose:
             n = len(diff.pre_existing)
             lines.append(f"#### Pre-existing failures ({n} tests)")
@@ -623,8 +625,8 @@ def _format_report(diffs: list[RepoDiff], args: argparse.Namespace) -> tuple[str
     if len(diffs) > 1 and not args.no_baseline:
         lines += [
             "### Summary",
-            "| repo | baseline passed | compat passed | regressions | improvements |",
-            "|---|---|---|---|---|",
+            "| repo | baseline passed | compat passed | remaining regressions |",
+            "|---|---|---|---|",
         ]
         for diff in diffs:
             label = f"{diff.repo.org}/{diff.repo.repo}"
@@ -632,8 +634,7 @@ def _format_report(diffs: list[RepoDiff], args: argparse.Namespace) -> tuple[str
                 f"| {label} "
                 f"| {diff.baseline.passed} "
                 f"| {diff.experiment.passed} "
-                f"| {len(diff.regressions)} "
-                f"| {len(diff.improvements)} |"
+                f"| {_format_regression_rate(len(diff.regressions), diff.baseline)} |"
             )
         lines.append("")
 
