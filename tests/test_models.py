@@ -8,6 +8,11 @@ import pytest
 import httprs
 
 
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
+
+
 class TestURL:
     def test_parse_full_url(self):
         url = httprs.URL("https://example.com:8080/path?q=1&r=2#frag")
@@ -258,6 +263,11 @@ class TestResponse:
         r = httprs.Response(200, headers={"X-Custom": "value"})
         assert r.headers.get("x-custom") == "value"
 
+    def test_content_from_iterable(self):
+        r = httprs.Response(200, content=[b"hello", b"-", b"world"])
+        assert r.content == b"hello-world"
+        assert r.headers.get("content-length") == "11"
+
     def test_with_request(self):
         req = httprs.Request("GET", "https://example.com/")
         r = httprs.Response(200, request=req)
@@ -272,3 +282,16 @@ class TestResponse:
         r = httprs.Response(200)
         elapsed = r.elapsed
         assert elapsed >= timedelta(0)
+
+    @pytest.mark.anyio
+    async def test_aread_returns_content(self):
+        r = httprs.Response(200, content=b"abc")
+        data = await r.aread()
+        assert data == b"abc"
+
+    @pytest.mark.anyio
+    async def test_aclose_closes_async_stream_response(self):
+        r = httprs.Response(200, stream=httprs.AsyncByteStream(b"abc"))
+        assert r.is_closed is False
+        await r.aclose()
+        assert r.is_closed is True

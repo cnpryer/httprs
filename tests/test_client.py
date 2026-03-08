@@ -89,6 +89,19 @@ def test_build_request_and_send(server):
     assert data.get("x-custom-header") == "my-value"
 
 
+def test_send_uses_custom_transport():
+    class StaticTransport:
+        def handle_request(self, request):
+            return httprs.Response(206, text="from-transport", request=request)
+
+    with httprs.Client(transport=StaticTransport()) as client:
+        request = client.build_request("GET", "https://example.com/")
+        response = client.send(request)
+
+    assert response.status_code == 206
+    assert response.text == "from-transport"
+
+
 def test_custom_headers_per_request(server):
     with httprs.Client() as client:
         response = client.get(
@@ -192,6 +205,18 @@ def test_client_closed_raises(server):
     client.close()
     with pytest.raises(RuntimeError):
         client.get(server.url)
+
+
+def test_subclass_super_init_kwargs(server):
+    class WrappedClient(httprs.Client):
+        def __init__(self, **kwargs):
+            kwargs.setdefault("follow_redirects", True)
+            super().__init__(**kwargs)
+
+    with WrappedClient(timeout=1.0) as client:
+        response = client.get(server.url)
+
+    assert response.status_code == 200
 
 
 def test_data_bytes(server):
