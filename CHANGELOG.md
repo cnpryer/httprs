@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - 
 
+## [0.0.1a4] - 2026-03-07
+
+- More httpx compatibility and v0.0.1a4 (#11)
+
 ## [0.0.1a3] - 2026-03-07
 
 ### Added
