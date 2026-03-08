@@ -132,10 +132,19 @@ Only explicit path-based excludes are applied:
 
 ### Triage policy (current)
 
-- Do not investigate `respx`-based ecosystem failures right now.
-- Treat failures as `respx`-based when traces include `respx/plugin.py`, `respx/router.py`, `RESPX: some routes were not called!`, or connection errors to `127.0.0.1:4010` caused by missing interception.
-- Prioritize non-`respx` regressions (URL, request/response API, headers/cookies/query params, stream behavior, retry semantics, etc.).
-- Revisit `respx` parity only in a dedicated transport-interception effort; it is intentionally out of scope for normal regression reduction work.
+#### Downstream compatibility exceptions
+
+- Ignore `respx`-related ecosystem failures for now.
+- Failures are considered `respx`-based if traces mention `respx/plugin.py`, `respx/router.py`, `RESPX: some routes were not called!`, or connection errors to `127.0.0.1:4010`.
+- Focus on regressions unrelated to `respx` (e.g., API, headers, cookies, streams, retries).
+- Address `respx` compatibility only in a future transport-interception phase.
+
+#### Minimal shim scope
+
+- The shim is module-name routing only (`import httpx` resolves to `httprs`); it does not emulate `httpx` behavior.
+- `respx` interception parity is out of scope in the normal ecosystem loop; treat those failures as excluded from day-to-day compatibility work.
+- `ASGITransport` and `WSGITransport` are not implemented in `httprs` and currently raise `NotImplementedError`.
+- Private `httpx` internals (`httpx._*`) are intentionally not mirrored; compatibility work targets public API/behavior only.
 
 ### Development loop
 
@@ -196,66 +205,19 @@ CI triggers on push to `main` and on all pull requests.
 
 ## Making changes
 
-### Adding a new Python-visible method to an existing class
-
-1. Add the method to the relevant `impl` block in the appropriate `src/*.rs` file
-2. Annotate it with `#[pyo3(signature = (...))]` to define the Python calling convention
-3. Run `uvx maturin develop` to recompile
-4. Add tests in `tests/`
-
-Example — adding `Client.trace()`:
-
-```rust
-// src/client.rs, inside #[pymethods] impl PyClient
-#[pyo3(signature = (url, *, content = None, json = None, data = None, headers = None, auth = None, timeout = None, follow_redirects = None))]
-pub fn trace(&self, py: Python<'_>, url: &str, ...) -> PyResult<PyResponse> {
-    self.request(py, "TRACE", url, ...)
-}
-```
-
-If the method also needs to be accessible as a top-level function, add it to `python/httprs/__init__.py`.
-
-### Adding a new exception
-
-1. Add `create_exception!(httprs, MyError, ParentError, "doc string.");` in `src/lib.rs`
-2. Register it in `_httprs()`: `m.add("MyError", m.py().get_type::<MyError>())?;`
-3. Re-export from `python/httprs/__init__.py`
-4. Add to `map_reqwest_error` if it should be raised automatically from reqwest errors
-
-### Adding a new top-level class
-
-1. Create a `#[pyclass]` struct in the appropriate `src/*.rs` file
-2. Implement `#[pymethods]` for it
-3. Add `m.add_class::<YourClass>()?;` in `_httprs()` in `src/lib.rs`
-4. Re-export from `python/httprs/__init__.py` and add to `__all__`
-
-### Changing the Python package structure
-
-The Python source root is `python/` (configured via `[tool.maturin] python-source = "python"`). The extension module is placed at `httprs._httprs` (`module-name = "httprs._httprs"`). Do not move these without updating both `pyproject.toml` and `python/httprs/__init__.py`.
+- Follow the [PyO3 guide](https://pyo3.rs/) for binding patterns and signatures.
+- Keep behavior in Rust (`src/*.rs`), and keep `python/httprs/__init__.py` as a thin re-export wrapper.
+- Rebuild the extension after wheel-impacting changes: `uvx maturin develop`.
+- Validate with `uv run --no-sync pytest ./tests`.
+- Keep package layout stable: Python source root is `python/`, extension module is `httprs._httprs`.
 
 ---
 
 ## Dependency management
 
-### Rust
-
-Add dependencies to `Cargo.toml`. Prefer features on existing crates over new crates. After adding, run `cargo build` to update `Cargo.lock`.
-
-### Python
-
-Dev dependencies are in `[dependency-groups] dev` in `pyproject.toml`. httprs has no runtime Python dependencies (`dependencies = []`).
-
-To add a dev dependency:
-
-```bash
-uv add --dev <package>
-```
-
-Newer versions of `uv` likely support `[dependency-groups]` tables in `pyproject.toml` files.
-
-```bash
-uv add --group dev <package>
-```
+- Use [uv documentation](https://docs.astral.sh/uv/) as the source of truth for Python environment and dependency workflows.
+- Add Rust dependencies in `Cargo.toml`, then run `cargo build` to update `Cargo.lock`.
+- Add Python dev dependencies to the `dev` group in `pyproject.toml` (for example: `uv add --group dev <package>`).
 
 ---
 
@@ -267,14 +229,8 @@ See [Release](release.md) for the automated release pipeline and PyPI publishing
 
 ## Key invariants to maintain
 
-- **GIL must be released during all blocking I/O.** Any `builder.send()`, `resp.bytes()`, or similar call must be wrapped in `crate::without_gil(|| ...)`. Failing to do this will deadlock when a local Python server (e.g., the test server) needs to run on the same thread.
-
-- **`without_gil` must only be called while holding the GIL.** It is not safe to call from a spawned thread or from inside another `without_gil` closure.
-
-- **`ResponseStream` uses `unsafe impl Sync`.** This is sound because the `Mutex` ensures exclusive access. Do not share `ResponseStream` without the mutex.
-
-- **`run_blocking` spawns on `SYNC_RUNTIME`.** Do not use it from an async context (deadlock risk). It is only for driving async futures from synchronous `#[pymethods]`.
-
-- **Header names are lowercased at ingestion.** `PyHeaders::from_pyobject`, `from_reqwest`, and `from_vec` all lowercase keys. Methods that accept a key (`get`, `__getitem__`, `__contains__`) also lowercase before comparison. Maintain this invariant for any new header code.
-
-- **The Python `BasicAuth`/`DigestAuth` subclasses shadow the Rust classes in `__init__.py`.** The Rust base classes are imported as `_BasicAuth`/`_DigestAuth` and the Python subclasses replace them. If a new auth type is added to Rust, follow the same pattern.
+- Release the GIL around blocking network/body I/O (`crate::without_gil(...)`).
+- Only call `without_gil` while already holding the GIL; do not nest it.
+- Use `run_blocking` only from synchronous `#[pymethods]` that must drive async work.
+- Keep header keys normalized to lowercase for lookup/update behavior.
+- Keep Python wrapper logic minimal; implement API behavior in Rust first.
