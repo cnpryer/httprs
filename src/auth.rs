@@ -2,6 +2,7 @@ use base64::{engine::general_purpose, Engine as _};
 use hex;
 use md5::{Digest as Md5Digest, Md5};
 use pyo3::prelude::*;
+use pyo3::types::PyList;
 use rand;
 use sha2::Sha256;
 use std::sync::Mutex;
@@ -250,5 +251,28 @@ impl PyDigestAuth {
 
     fn __repr__(&self) -> String {
         format!("DigestAuth(username={:?})", self.username)
+    }
+}
+
+#[pyclass(name = "Auth")]
+pub struct PyAuth;
+
+#[pymethods]
+impl PyAuth {
+    #[new]
+    pub fn new() -> Self {
+        Self
+    }
+
+    pub fn auth_flow<'py>(&self, py: Python<'py>, request: Py<PyAny>) -> PyResult<Py<PyAny>> {
+        let list = PyList::new(py, [request])?;
+        let iter = list.call_method0("__iter__")?;
+        Ok(iter.into_any().unbind())
+    }
+}
+
+impl Default for PyAuth {
+    fn default() -> Self {
+        Self::new()
     }
 }

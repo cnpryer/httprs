@@ -5,7 +5,11 @@ use pyo3::prelude::*;
 pub mod auth;
 pub mod client;
 pub mod config;
+pub mod cookies;
 pub mod models;
+pub mod proxy;
+pub mod query_params;
+pub mod transports;
 
 create_exception!(
     httprs,
@@ -84,6 +88,82 @@ create_exception!(
     HTTPStatusError,
     HTTPError,
     "Response closed with an error status code."
+);
+create_exception!(
+    httprs,
+    PoolTimeout,
+    TimeoutException,
+    "Timed out while acquiring a connection from the pool."
+);
+create_exception!(
+    httprs,
+    WriteError,
+    NetworkError,
+    "Failed to send data to the network."
+);
+create_exception!(
+    httprs,
+    CloseError,
+    NetworkError,
+    "Failed while closing a connection."
+);
+create_exception!(
+    httprs,
+    ProxyError,
+    ConnectError,
+    "Failed to connect to a proxy."
+);
+create_exception!(
+    httprs,
+    DecodingError,
+    ReadError,
+    "Failed to decode response content."
+);
+create_exception!(httprs, InvalidURL, UnsupportedProtocol, "Invalid URL.");
+create_exception!(httprs, ProtocolError, HTTPError, "Protocol error.");
+create_exception!(httprs, StreamError, HTTPError, "Stream-related error.");
+create_exception!(httprs, CookieConflict, HTTPError, "Cookie conflict.");
+create_exception!(
+    httprs,
+    StreamConsumed,
+    StreamError,
+    "Attempted to read a stream that has already been consumed."
+);
+create_exception!(
+    httprs,
+    StreamNotRead,
+    StreamError,
+    "Attempted to access stream content before reading."
+);
+create_exception!(
+    httprs,
+    StreamClosed,
+    StreamError,
+    "Attempted to read a closed stream."
+);
+create_exception!(
+    httprs,
+    ResponseNotRead,
+    StreamError,
+    "Attempted to access response content before reading."
+);
+create_exception!(
+    httprs,
+    RequestNotRead,
+    StreamError,
+    "Attempted to access request content before reading."
+);
+create_exception!(
+    httprs,
+    LocalProtocolError,
+    ProtocolError,
+    "Client-side protocol error."
+);
+create_exception!(
+    httprs,
+    RemoteProtocolError,
+    ProtocolError,
+    "Server-side protocol error."
 );
 
 /// Dedicated multi-thread Tokio runtime used by PyAsyncClient constructors
@@ -169,6 +249,28 @@ fn _httprs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     )?;
     m.add("TooManyRedirects", m.py().get_type::<TooManyRedirects>())?;
     m.add("HTTPStatusError", m.py().get_type::<HTTPStatusError>())?;
+    m.add("PoolTimeout", m.py().get_type::<PoolTimeout>())?;
+    m.add("WriteError", m.py().get_type::<WriteError>())?;
+    m.add("CloseError", m.py().get_type::<CloseError>())?;
+    m.add("ProxyError", m.py().get_type::<ProxyError>())?;
+    m.add("DecodingError", m.py().get_type::<DecodingError>())?;
+    m.add("InvalidURL", m.py().get_type::<InvalidURL>())?;
+    m.add("ProtocolError", m.py().get_type::<ProtocolError>())?;
+    m.add("StreamError", m.py().get_type::<StreamError>())?;
+    m.add("CookieConflict", m.py().get_type::<CookieConflict>())?;
+    m.add("StreamConsumed", m.py().get_type::<StreamConsumed>())?;
+    m.add("StreamNotRead", m.py().get_type::<StreamNotRead>())?;
+    m.add("StreamClosed", m.py().get_type::<StreamClosed>())?;
+    m.add("ResponseNotRead", m.py().get_type::<ResponseNotRead>())?;
+    m.add("RequestNotRead", m.py().get_type::<RequestNotRead>())?;
+    m.add(
+        "LocalProtocolError",
+        m.py().get_type::<LocalProtocolError>(),
+    )?;
+    m.add(
+        "RemoteProtocolError",
+        m.py().get_type::<RemoteProtocolError>(),
+    )?;
 
     // Classes
     m.add_class::<config::PyTimeout>()?;
@@ -177,11 +279,29 @@ fn _httprs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<models::PyHeaders>()?;
     m.add_class::<models::PyRequest>()?;
     m.add_class::<models::PyResponse>()?;
+    m.add_class::<transports::PyBaseTransport>()?;
+    m.add_class::<transports::PyAsyncBaseTransport>()?;
+    m.add_class::<transports::PyMockTransport>()?;
+    m.add_class::<transports::PyHTTPTransport>()?;
+    m.add_class::<transports::PyAsyncHTTPTransport>()?;
+    m.add_class::<transports::PyASGITransport>()?;
+    m.add_class::<transports::PyWSGITransport>()?;
+    m.add_class::<transports::PySyncByteStream>()?;
+    m.add_class::<transports::PyAsyncByteStream>()?;
+    m.add_class::<transports::PyByteStream>()?;
+    m.add_class::<query_params::PyQueryParams>()?;
+    m.add_class::<cookies::PyCookies>()?;
+    m.add_class::<auth::PyAuth>()?;
+    m.add_class::<proxy::PyProxy>()?;
     m.add_class::<auth::PyBasicAuth>()?;
     m.add_class::<auth::PyDigestAuth>()?;
     m.add_class::<client::PyClient>()?;
     m.add_class::<client::PyStreamContext>()?;
     m.add_class::<client::PyAsyncClient>()?;
+
+    let object_ctor = m.py().import("builtins")?.getattr("object")?;
+    let sentinel = object_ctor.call0()?;
+    m.add("USE_CLIENT_DEFAULT", sentinel)?;
 
     Ok(())
 }
