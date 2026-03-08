@@ -72,6 +72,86 @@ uv run --no-sync pytest ./tests -vv
 
 ---
 
+## Ecosystem tests
+
+Ecosystem tests measure real-world httpx API compatibility by cloning third-party repos, running their test suites twice — once against real httpx (baseline) and once with httprs substituted via a compatibility shim — and reporting which tests regress.
+
+### Scripts
+
+| File | Purpose |
+|---|---|
+| `check_ecosystem.py` | Main orchestrator: clones repos, manages venvs, runs pytest, prints report |
+| `httpx_compat.py` | httpx → httprs compatibility shim (injected as `sys.modules["httpx"]`) |
+| `ecosystem_conftest.py` | pytest plugin that activates the shim and converts transport-stub errors to skips |
+
+### Target repos
+
+| Key | Repo |
+|---|---|
+| `anthropic` | `anthropics/anthropic-sdk-python` |
+| `openai` | `openai/openai-python` |
+
+### Quick start
+
+```bash
+# Build the extension first
+uvx maturin develop
+
+# Smoke test: one repo, no baseline, short timeout
+just ecosystem --repos openai --no-baseline --timeout 120
+
+# Full baseline vs. experiment comparison
+just ecosystem -v
+
+# Skip the build step with a pre-built wheel
+just ecosystem --httprs-wheel target/wheels/httprs-*.whl
+```
+
+### How it works
+
+1. **Clone** each repo at the pinned ref (reuses existing checkouts unless `--clean`)
+2. **Create `.venv-ecosystem`** inside the checkout, install the repo's dev dependencies plus the httprs wheel
+3. **Baseline run**: pytest with real httpx (no shim)
+4. **Experiment run**: pytest with `ecosystem_conftest.py` injected via `-p _httprs_compat`, which replaces `sys.modules["httpx"]` with the shim before any test modules are imported
+5. **Diff**: `regressions = experiment_failing − baseline_failing`; always exits with code `0` (report only)
+
+### Auto-excluded tests
+
+Tests that use unsupported transports are automatically converted to skips rather than failures:
+
+- **ASGI/WSGI transports** (`ASGITransport`, `WSGITransport`): the shim stubs raise `NotImplementedError` on instantiation; the conftest plugin catches this and marks the test skipped
+- **Mock libraries** (`respx`, `pytest-httpx`): these patch httpx internals; `AttributeError`s from accessing `httpx._*` internals are caught and skipped
+- **Live API tests** (`tests/api_resources/`): both SDKs' `api_resources` directories make real network calls; excluded via `--ignore=tests/api_resources`
+
+### Known gaps covered by the shim
+
+| httpx feature | Shim approach |
+|---|---|
+| `params=` kwarg on all request methods | `_append_query_params()` prepends to URL before forwarding |
+| `response.history` | `Response` proxy wraps `httprs.Response` and adds `history = []` |
+| `httpx.codes.OK` etc. | Re-exported from `httprs.codes` (IntEnum) |
+| `from httpx._models import …` | Fake submodules registered in `sys.modules` |
+| `PoolTimeout`, `InvalidURL`, … | Aliased to nearest httprs exception |
+| `isinstance(client, httpx.Client)` | `Client` inherits from real `httpx.Client` (captured before shim injection) |
+
+### CLI reference
+
+```
+just ecosystem [options]
+# or: python check_ecosystem.py [options]
+
+  --checkouts-dir PATH   Directory for repo checkouts (default: /tmp/httprs-ecosystem)
+  --repos REPO …         Subset to run: openai, anthropic (default: all)
+  --httprs-wheel PATH    Use a pre-built wheel instead of running maturin build
+  --no-baseline          Skip the httpx baseline; only report httprs pass/fail counts
+  --clean                Wipe existing checkouts before cloning
+  --timeout SECONDS      Per-repo pytest timeout (default: 600)
+  --concurrency N        Max repos processed in parallel (default: 2)
+  -v, --verbose          Print all failing test IDs
+```
+
+---
+
 ## Linting and formatting
 
 ```bash
