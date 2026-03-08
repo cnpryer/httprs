@@ -57,6 +57,7 @@ httprs/
     models.rs        # URL, Headers, Request, Response
     auth.rs          # BasicAuth, DigestAuth
     config.rs        # Timeout, Limits
+    ...
   python/
     httprs/
       __init__.py    # Python wrapper layer, convenience functions
