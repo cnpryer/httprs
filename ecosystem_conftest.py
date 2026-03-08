@@ -1,10 +1,8 @@
 """pytest plugin injected into cloned ecosystem repos.
 
-Patches sys.modules['httpx'] with the httprs compat shim before any test
-modules are collected, and converts transport-stub NotImplementedErrors into
-skips so they don't count as regressions.
-
-Injected via PYTHONPATH by check_ecosystem.py -- not used directly.
+Primary compat injection happens in check_ecosystem.py by placing a temporary
+"httpx" package on PYTHONPATH. This plugin is a minimal safety net that only
+loads the shim if real httpx was imported first.
 """
 
 from __future__ import annotations
@@ -21,11 +19,11 @@ _SHIM_PATH = os.environ.get(
 )
 
 
-def pytest_configure(config) -> None:
+def _patch_httpx() -> None:
     """Patch sys.modules['httpx'] with the httprs compat shim."""
     existing = sys.modules.get("httpx")
     if existing is not None and getattr(existing, "_httprs_compat", False):
-        return  # Already patched; idempotent.
+        return
 
     shim_path = Path(_SHIM_PATH)
     if not shim_path.exists():
@@ -55,26 +53,17 @@ def pytest_configure(config) -> None:
 
     sys.modules["httpx"] = shim
 
-    # Register submodule stubs so `from httpx._models import X` doesn't fail.
-    shim._register_submodule_stubs(shim)
+
+def pytest_load_initial_conftests(early_config, parser, args) -> None:
+    """Patch as early as possible in pytest startup."""
+    _patch_httpx()
 
 
-def pytest_runtest_logreport(report) -> None:
-    """Convert unsupported-transport failures (any phase) to skips."""
-    if not report.failed:
-        return
+def pytest_configure(config) -> None:
+    """Safety net in case early hooks were bypassed."""
+    _patch_httpx()
 
-    longrepr = str(getattr(report, "longrepr", ""))
 
-    # Transport stubs: NotImplementedError with our sentinel phrase.
-    if "NotImplementedError" in longrepr and "httprs compat shim" in longrepr:
-        report.outcome = "skipped"
-        report.longrepr = "Skipped: transport not supported by httprs compat shim"
-        return
-
-    # respx / pytest-httpx patch httpx internals; skip those too.
-    if "AttributeError" in longrepr and any(
-        pat in longrepr for pat in ("respx.", "pytest_httpx.", "httpx._", "HTTPX_MOCK")
-    ):
-        report.outcome = "skipped"
-        report.longrepr = "Skipped: httpx mock library incompatible with httprs shim"
+# Import-time patching is intentional as a fallback if any plugin imports
+# real httpx before pytest hooks execute.
+_patch_httpx()

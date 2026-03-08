@@ -3,6 +3,7 @@ use crate::config::PyTimeout;
 use crate::models::{version_str, PyHeaders, PyRequest, PyResponse, ResponseStream};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
+use pyo3::types::{PyByteArray, PyBytes, PyDict, PyList, PyTuple};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -76,6 +77,111 @@ fn form_encode_pairs(pairs: &[(String, String)]) -> String {
         .map(|(k, v)| format!("{}={}", urlencoding_encode(k), urlencoding_encode(v)))
         .collect::<Vec<_>>()
         .join("&")
+}
+
+fn append_bytes_chunk(item: &Bound<'_, PyAny>, out: &mut Vec<u8>) -> PyResult<()> {
+    if let Ok(bytes) = item.cast::<PyBytes>() {
+        out.extend_from_slice(bytes.as_bytes());
+    } else if let Ok(bytearray) = item.cast::<PyByteArray>() {
+        out.extend_from_slice(&bytearray.to_vec());
+    } else if let Ok(text) = item.extract::<String>() {
+        out.extend_from_slice(text.as_bytes());
+    } else if let Ok(chunk) = item.extract::<Vec<u8>>() {
+        out.extend_from_slice(&chunk);
+    } else {
+        return Err(pyo3::exceptions::PyTypeError::new_err(
+            "content iterator items must be bytes, bytearray, or str",
+        ));
+    }
+    Ok(())
+}
+
+fn collect_content_bytes(py: Python<'_>, content: Option<Py<PyAny>>) -> PyResult<Vec<u8>> {
+    let Some(content) = content else {
+        return Ok(Vec::new());
+    };
+    let bound = content.bind(py);
+    if let Ok(bytes) = bound.cast::<PyBytes>() {
+        return Ok(bytes.as_bytes().to_vec());
+    }
+    if let Ok(bytearray) = bound.cast::<PyByteArray>() {
+        return Ok(bytearray.to_vec());
+    }
+    if let Ok(text) = bound.extract::<String>() {
+        return Ok(text.into_bytes());
+    }
+
+    let mut out = Vec::new();
+    for item in bound.try_iter()? {
+        let item = item?;
+        append_bytes_chunk(&item, &mut out)?;
+    }
+    Ok(out)
+}
+
+fn timeout_config_from_arg(
+    py: Python<'_>,
+    timeout: Option<Py<PyAny>>,
+    default: &PyTimeout,
+) -> PyTimeout {
+    match timeout {
+        None => default.clone(),
+        Some(t) => {
+            let bound = t.bind(py);
+            if let Ok(f) = bound.extract::<f64>() {
+                PyTimeout::new(Some(f), None, None, None, None)
+            } else if let Ok(pt) = bound.extract::<PyRef<PyTimeout>>() {
+                pt.clone()
+            } else {
+                default.clone()
+            }
+        }
+    }
+}
+
+fn immediate_awaitable<'py>(py: Python<'py>, value: Py<PyAny>) -> PyResult<Bound<'py, PyAny>> {
+    pyo3_async_runtimes::tokio::future_into_py(py, async move { Ok(value) })
+}
+
+fn append_query_string(url: &str, query: &str) -> String {
+    if query.is_empty() {
+        return url.to_string();
+    }
+    let sep = if url.contains('?') { "&" } else { "?" };
+    format!("{url}{sep}{query}")
+}
+
+fn params_to_query(py: Python<'_>, params: Option<Py<PyAny>>) -> PyResult<Option<String>> {
+    let Some(params) = params else {
+        return Ok(None);
+    };
+    let bound = params.bind(py);
+    if bound.is_none() {
+        return Ok(None);
+    }
+    if let Ok(s) = bound.extract::<String>() {
+        return Ok(if s.is_empty() { None } else { Some(s) });
+    }
+    if let Ok(d) = bound.cast::<PyDict>() {
+        let mut ser = url::form_urlencoded::Serializer::new(String::new());
+        for (k, v) in d.iter() {
+            let key: String = k.extract()?;
+            let value: String = v.extract()?;
+            ser.append_pair(&key, &value);
+        }
+        let q = ser.finish();
+        return Ok(if q.is_empty() { None } else { Some(q) });
+    }
+    if let Ok(l) = bound.cast::<PyList>() {
+        let mut ser = url::form_urlencoded::Serializer::new(String::new());
+        for item in l.iter() {
+            let (k, v): (String, String) = item.extract()?;
+            ser.append_pair(&k, &v);
+        }
+        let q = ser.finish();
+        return Ok(if q.is_empty() { None } else { Some(q) });
+    }
+    Ok(None)
 }
 
 enum AuthKind {
@@ -241,7 +347,7 @@ fn is_private_url(url: &url::Url) -> bool {
                 || (addr.segments()[0] & 0xffc0 == 0xfe80) // link-local fe80::/10
                 || (addr.segments()[0] & 0xfe00 == 0xfc00) // unique-local fc00::/7
                 || (addr.segments()[0] & 0xff00 == 0xff00) // multicast ff00::/8
-                || addr.to_ipv4_mapped().map_or(false, |v4| {
+                || addr.to_ipv4_mapped().is_some_and(|v4| {
                     v4.is_loopback() || v4.is_private() || v4.is_link_local() || v4.is_unspecified()
                 })
         }
@@ -272,7 +378,7 @@ fn make_redirect_policy(follow: bool, block_private: bool) -> reqwest::redirect:
     }
 }
 
-#[pyclass(name = "Client")]
+#[pyclass(name = "Client", subclass)]
 pub struct PyClient {
     inner: Option<reqwest::blocking::Client>,
     base_url: Option<String>,
@@ -283,6 +389,7 @@ pub struct PyClient {
     #[allow(dead_code)]
     block_private_redirects: bool,
     default_auth: Option<AuthKind>,
+    transport: Option<Py<PyAny>>,
 }
 
 impl PyClient {
@@ -315,6 +422,7 @@ impl PyClient {
         headers = None,
         timeout = None,
         auth = None,
+        transport = None,
         follow_redirects = true,
         *,
         http2 = false,
@@ -326,6 +434,7 @@ impl PyClient {
         headers: Option<Py<PyAny>>,
         timeout: Option<Py<PyAny>>,
         auth: Option<Py<PyAny>>,
+        transport: Option<Py<PyAny>>,
         follow_redirects: bool,
         http2: bool,
         block_private_redirects: bool,
@@ -377,7 +486,27 @@ impl PyClient {
             follow_redirects,
             block_private_redirects,
             default_auth,
+            transport,
         })
+    }
+
+    // TODO(cnpryer):
+    //
+    // ```python
+    // class Client(httprs.Client):
+    //     def __init__(self, **kwargs) -> None:
+    //         kwargs.setdefault("timeout", DEFAULT_TIMEOUT)
+    //         kwargs.setdefault("limits", DEFAULT_CONNECTION_LIMITS)
+    //         kwargs.setdefault("follow_redirects", True)
+    //         super().__init__(**kwargs)
+    // ```
+    #[pyo3(signature = (*_args, **_kwargs))]
+    fn __init__(
+        _slf: &Bound<'_, Self>,
+        _args: &Bound<'_, PyTuple>,
+        _kwargs: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<()> {
+        Ok(())
     }
 
     #[pyo3(signature = (
@@ -699,18 +828,39 @@ impl PyClient {
     }
 
     /// Build a Request object without sending it.
-    #[pyo3(signature = (method, url, *, content = None, json = None, data = None, headers = None))]
+    #[pyo3(signature = (method, url, *, content = None, json = None, data = None, files = None, headers = None, params = None, timeout = None, extensions = None))]
     pub fn build_request(
         &self,
         py: Python<'_>,
         method: &str,
-        url: &str,
-        content: Option<Vec<u8>>,
+        url: Py<PyAny>,
+        content: Option<Py<PyAny>>,
         json: Option<Py<PyAny>>,
         data: Option<Py<PyAny>>,
+        files: Option<Py<PyAny>>,
         headers: Option<Py<PyAny>>,
+        params: Option<Py<PyAny>>,
+        timeout: Option<Py<PyAny>>,
+        extensions: Option<Py<PyAny>>,
     ) -> PyResult<PyRequest> {
-        let full_url = self.resolve_url(url);
+        let _ = files;
+        let url_value = {
+            let bound = url.bind(py);
+            if let Ok(url_str) = bound.extract::<String>() {
+                url_str
+            } else if bound.hasattr("__str__")? {
+                bound.str()?.extract()?
+            } else {
+                return Err(pyo3::exceptions::PyTypeError::new_err(
+                    "url must be a str or URL instance",
+                ));
+            }
+        };
+        let mut full_url = self.resolve_url(&url_value);
+        if let Some(query) = params_to_query(py, params)? {
+            full_url = append_query_string(&full_url, &query);
+        }
+
         let mut merged_headers = self.default_headers.clone();
 
         if let Some(h) = headers {
@@ -721,26 +871,95 @@ impl PyClient {
             }
         }
 
-        let body_content = match build_body(py, content, json, data)? {
-            RequestBody::Empty => vec![],
-            RequestBody::Bytes(b) => b,
-            RequestBody::Json(s) => s.into_bytes(),
-            RequestBody::Form(pairs) => form_encode_pairs(&pairs).into_bytes(),
-        };
+        let has_content = content.is_some();
+        let mut body_content = collect_content_bytes(py, content)?;
+        if !has_content {
+            if let Some(json_obj) = json {
+                let json_mod = py.import("json")?;
+                let json_str: String = json_mod
+                    .call_method1("dumps", (json_obj.bind(py),))?
+                    .extract()?;
+                body_content = json_str.into_bytes();
+                if merged_headers.get("content-type", None).is_none() {
+                    merged_headers
+                        .inner
+                        .push(("content-type".to_string(), "application/json".to_string()));
+                }
+            } else if let Some(data_obj) = data {
+                let body = build_body(py, None, None, Some(data_obj))?;
+                body_content = match body {
+                    RequestBody::Empty => Vec::new(),
+                    RequestBody::Bytes(b) => b,
+                    RequestBody::Json(s) => s.into_bytes(),
+                    RequestBody::Form(pairs) => {
+                        if merged_headers.get("content-type", None).is_none() {
+                            merged_headers.inner.push((
+                                "content-type".to_string(),
+                                "application/x-www-form-urlencoded".to_string(),
+                            ));
+                        }
+                        form_encode_pairs(&pairs).into_bytes()
+                    }
+                };
+            }
+        }
+
+        let timeout_cfg = timeout_config_from_arg(py, timeout, &self.timeout);
+        let ext_dict = PyDict::new(py);
+        if let Some(ext) = extensions {
+            let bound = ext.bind(py);
+            if let Ok(d) = bound.cast::<PyDict>() {
+                for (k, v) in d.iter() {
+                    ext_dict.set_item(k, v)?;
+                }
+            }
+        }
+        let timeout_dict = PyDict::new(py);
+        timeout_dict.set_item("connect", timeout_cfg.connect)?;
+        timeout_dict.set_item("read", timeout_cfg.read)?;
+        timeout_dict.set_item("write", timeout_cfg.write)?;
+        timeout_dict.set_item("pool", timeout_cfg.pool)?;
+        ext_dict.set_item("timeout", timeout_dict)?;
 
         let headers_obj: Py<PyHeaders> = Py::new(py, merged_headers)?;
         PyRequest::new(
             py,
             method,
-            &full_url,
+            full_url.into_pyobject(py)?.into_any().unbind(),
             Some(headers_obj.into_bound(py).into_any().unbind()),
-            Some(body_content),
+            Some(PyBytes::new(py, &body_content).into_any().unbind()),
+            Some(ext_dict.into_any().unbind()),
         )
     }
 
     /// Send a pre-built Request.
-    pub fn send(&self, _py: Python<'_>, request: &PyRequest) -> PyResult<PyResponse> {
-        let client = self.get_client()?.clone();
+    #[pyo3(signature = (request, *, stream = false, auth = None, follow_redirects = None))]
+    pub fn send<'py>(
+        slf: &Bound<'py, Self>,
+        py: Python<'py>,
+        request: &PyRequest,
+        stream: bool,
+        auth: Option<Py<PyAny>>,
+        follow_redirects: Option<bool>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let _ = auth;
+        let _ = follow_redirects;
+
+        let request_obj = Py::new(py, request.clone())?;
+        let transport_obj: Option<Py<PyAny>> = {
+            let this = slf.borrow();
+            this.transport.as_ref().map(|t| t.clone_ref(py))
+        };
+        if let Some(transport) = transport_obj {
+            let transport_bound = transport.into_bound(py).into_any();
+            if transport_bound.hasattr("handle_request")? {
+                return transport_bound
+                    .call_method1("handle_request", (request_obj.clone_ref(py),));
+            }
+        }
+
+        let this = slf.borrow();
+        let client = this.get_client()?.clone();
         let method_str = request.method.clone();
         let url = request.url.inner.to_string();
         let headers: Vec<(String, String)> = request.headers.inner.clone();
@@ -763,7 +982,13 @@ impl PyClient {
         let result = crate::without_gil(|| builder.send());
         let response = result.map_err(crate::map_reqwest_error)?;
         let elapsed = start.elapsed().as_millis();
-        PyResponse::from_blocking(response, elapsed, None)
+        let py_response = if stream {
+            PyResponse::from_blocking_stream(response, elapsed, Some(request_obj.clone_ref(py)))
+        } else {
+            PyResponse::from_blocking(response, elapsed, Some(request_obj.clone_ref(py)))?
+        };
+        let response_obj = Py::new(py, py_response)?;
+        Ok(response_obj.into_bound(py).into_any())
     }
 
     /// Return a context manager for streaming the response.
@@ -800,6 +1025,16 @@ impl PyClient {
 
     pub fn close(&mut self) {
         self.inner = None;
+    }
+
+    #[getter]
+    pub fn is_closed(&self) -> bool {
+        self.inner.is_none()
+    }
+
+    #[getter]
+    pub fn timeout(&self) -> PyTimeout {
+        self.timeout.clone()
     }
 
     fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
@@ -882,7 +1117,7 @@ impl PyStreamContext {
     }
 }
 
-#[pyclass(name = "AsyncClient")]
+#[pyclass(name = "AsyncClient", subclass)]
 pub struct PyAsyncClient {
     inner: Option<reqwest::Client>,
     base_url: Option<String>,
@@ -892,6 +1127,8 @@ pub struct PyAsyncClient {
     follow_redirects: bool,
     #[allow(dead_code)]
     block_private_redirects: bool,
+    #[allow(dead_code)]
+    transport: Option<Py<PyAny>>,
 }
 
 impl PyAsyncClient {
@@ -957,7 +1194,9 @@ async fn convert_async_response(
         url,
         request,
         encoding,
+        extensions: None,
         stream: None,
+        py_stream: None,
     })
 }
 
@@ -968,6 +1207,7 @@ impl PyAsyncClient {
         base_url = None,
         headers = None,
         timeout = None,
+        transport = None,
         follow_redirects = true,
         *,
         http2 = false,
@@ -978,6 +1218,7 @@ impl PyAsyncClient {
         base_url: Option<String>,
         headers: Option<Py<PyAny>>,
         timeout: Option<Py<PyAny>>,
+        transport: Option<Py<PyAny>>,
         follow_redirects: bool,
         http2: bool,
         block_private_redirects: bool,
@@ -1023,7 +1264,27 @@ impl PyAsyncClient {
             timeout: py_timeout,
             follow_redirects,
             block_private_redirects,
+            transport,
         })
+    }
+
+    // TODO(cnpryer):
+    //
+    // ```python
+    // class Client(httprs.AsyncClient):
+    //     def __init__(self, **kwargs) -> None:
+    //         kwargs.setdefault("timeout", DEFAULT_TIMEOUT)
+    //         kwargs.setdefault("limits", DEFAULT_CONNECTION_LIMITS)
+    //         kwargs.setdefault("follow_redirects", True)
+    //         super().__init__(**kwargs)
+    // ```
+    #[pyo3(signature = (*_args, **_kwargs))]
+    fn __init__(
+        _slf: &Bound<'_, Self>,
+        _args: &Bound<'_, PyTuple>,
+        _kwargs: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<()> {
+        Ok(())
     }
 
     fn request<'py>(
@@ -1280,8 +1541,194 @@ impl PyAsyncClient {
         )
     }
 
+    #[pyo3(signature = (method, url, *, content = None, json = None, data = None, files = None, headers = None, params = None, timeout = None, extensions = None))]
+    pub fn build_request(
+        &self,
+        py: Python<'_>,
+        method: &str,
+        url: Py<PyAny>,
+        content: Option<Py<PyAny>>,
+        json: Option<Py<PyAny>>,
+        data: Option<Py<PyAny>>,
+        files: Option<Py<PyAny>>,
+        headers: Option<Py<PyAny>>,
+        params: Option<Py<PyAny>>,
+        timeout: Option<Py<PyAny>>,
+        extensions: Option<Py<PyAny>>,
+    ) -> PyResult<PyRequest> {
+        let _ = files;
+        let url_value = {
+            let bound = url.bind(py);
+            if let Ok(url_str) = bound.extract::<String>() {
+                url_str
+            } else if bound.hasattr("__str__")? {
+                bound.str()?.extract()?
+            } else {
+                return Err(pyo3::exceptions::PyTypeError::new_err(
+                    "url must be a str or URL instance",
+                ));
+            }
+        };
+        let mut full_url = self.resolve_url(&url_value);
+        if let Some(query) = params_to_query(py, params)? {
+            full_url = append_query_string(&full_url, &query);
+        }
+
+        let mut merged_headers = self.default_headers.clone();
+        if let Some(h) = headers {
+            let extra = PyHeaders::from_pyobject(py, h)?;
+            for (k, v) in extra.inner {
+                merged_headers.inner.retain(|(ek, _)| ek != &k);
+                merged_headers.inner.push((k, v));
+            }
+        }
+
+        let has_content = content.is_some();
+        let mut body_content = collect_content_bytes(py, content)?;
+        if !has_content {
+            if let Some(json_obj) = json {
+                let json_mod = py.import("json")?;
+                let json_str: String = json_mod
+                    .call_method1("dumps", (json_obj.bind(py),))?
+                    .extract()?;
+                body_content = json_str.into_bytes();
+                if merged_headers.get("content-type", None).is_none() {
+                    merged_headers
+                        .inner
+                        .push(("content-type".to_string(), "application/json".to_string()));
+                }
+            } else if let Some(data_obj) = data {
+                let body = build_body(py, None, None, Some(data_obj))?;
+                body_content = match body {
+                    RequestBody::Empty => Vec::new(),
+                    RequestBody::Bytes(b) => b,
+                    RequestBody::Json(s) => s.into_bytes(),
+                    RequestBody::Form(pairs) => {
+                        if merged_headers.get("content-type", None).is_none() {
+                            merged_headers.inner.push((
+                                "content-type".to_string(),
+                                "application/x-www-form-urlencoded".to_string(),
+                            ));
+                        }
+                        form_encode_pairs(&pairs).into_bytes()
+                    }
+                };
+            }
+        }
+
+        let timeout_cfg = timeout_config_from_arg(py, timeout, &self.timeout);
+        let ext_dict = PyDict::new(py);
+        if let Some(ext) = extensions {
+            let bound = ext.bind(py);
+            if let Ok(d) = bound.cast::<PyDict>() {
+                for (k, v) in d.iter() {
+                    ext_dict.set_item(k, v)?;
+                }
+            }
+        }
+        let timeout_dict = PyDict::new(py);
+        timeout_dict.set_item("connect", timeout_cfg.connect)?;
+        timeout_dict.set_item("read", timeout_cfg.read)?;
+        timeout_dict.set_item("write", timeout_cfg.write)?;
+        timeout_dict.set_item("pool", timeout_cfg.pool)?;
+        ext_dict.set_item("timeout", timeout_dict)?;
+
+        let headers_obj: Py<PyHeaders> = Py::new(py, merged_headers)?;
+        PyRequest::new(
+            py,
+            method,
+            full_url.into_pyobject(py)?.into_any().unbind(),
+            Some(headers_obj.into_bound(py).into_any().unbind()),
+            Some(PyBytes::new(py, &body_content).into_any().unbind()),
+            Some(ext_dict.into_any().unbind()),
+        )
+    }
+
+    #[pyo3(signature = (request, *, stream = false, auth = None, follow_redirects = None))]
+    pub fn send<'py>(
+        slf: &Bound<'py, Self>,
+        py: Python<'py>,
+        request: &PyRequest,
+        stream: bool,
+        auth: Option<Py<PyAny>>,
+        follow_redirects: Option<bool>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let _ = auth;
+        let _ = follow_redirects;
+        let request_obj = Py::new(py, request.clone())?;
+
+        let transport_obj: Option<Py<PyAny>> = {
+            let this = slf.borrow();
+            this.transport.as_ref().map(|t| t.clone_ref(py))
+        };
+        if let Some(transport) = transport_obj {
+            let transport_bound = transport.into_bound(py).into_any();
+            if transport_bound.hasattr("handle_async_request")? {
+                return transport_bound
+                    .call_method1("handle_async_request", (request_obj.clone_ref(py),));
+            }
+            if transport_bound.hasattr("handle_request")? {
+                let resp =
+                    transport_bound.call_method1("handle_request", (request_obj.clone_ref(py),))?;
+                return immediate_awaitable(py, resp.unbind());
+            }
+        }
+
+        let this = slf.borrow();
+        let client = this.get_client()?;
+        let method_str = request.method.clone();
+        let url = request.url.inner.to_string();
+        let headers = request.headers.inner.clone();
+        let body = if request.content.is_empty() {
+            None
+        } else {
+            Some(request.content.clone())
+        };
+        let request_obj_stream = request_obj.clone_ref(py);
+        let request_obj_regular = request_obj.clone_ref(py);
+
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let method = reqwest::Method::from_bytes(method_str.as_bytes())
+                .map_err(|_| PyValueError::new_err("Invalid method"))?;
+            let mut builder = client.request(method, &url);
+            for (k, v) in &headers {
+                builder = builder.header(k.as_str(), v.as_str());
+            }
+            if let Some(b) = body {
+                builder = builder.body(b);
+            }
+            let start = Instant::now();
+            let response = builder.send().await.map_err(crate::map_reqwest_error)?;
+            let elapsed = start.elapsed().as_millis();
+            if stream {
+                Ok(PyResponse::from_async_stream(
+                    response,
+                    elapsed,
+                    Some(request_obj_stream),
+                ))
+            } else {
+                convert_async_response(response, elapsed, Some(request_obj_regular)).await
+            }
+        })
+    }
+
     pub fn close(&mut self) {
         self.inner = None;
+    }
+
+    pub fn aclose<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        self.inner = None;
+        immediate_awaitable(py, py.None())
+    }
+
+    #[getter]
+    pub fn is_closed(&self) -> bool {
+        self.inner.is_none()
+    }
+
+    #[getter]
+    pub fn timeout(&self) -> PyTimeout {
+        self.timeout.clone()
     }
 
     fn __aenter__<'py>(slf: Py<Self>, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {

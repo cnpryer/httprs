@@ -81,8 +81,8 @@ Ecosystem tests measure real-world httpx API compatibility by cloning third-part
 | File | Purpose |
 |---|---|
 | `check_ecosystem.py` | Main orchestrator: clones repos, manages venvs, runs pytest, prints report |
-| `httpx_compat.py` | httpx → httprs compatibility shim (injected as `sys.modules["httpx"]`) |
-| `ecosystem_conftest.py` | pytest plugin that activates the shim and converts transport-stub errors to skips |
+| `httpx_compat.py` | httpx → httprs compatibility shim (materialized as a temporary `httpx` package on `PYTHONPATH`) |
+| `ecosystem_conftest.py` | minimal pytest safety-net plugin that ensures the shim is loaded if real httpx was imported first |
 
 ### Target repos
 
@@ -112,27 +112,38 @@ just ecosystem --httprs-wheel target/wheels/httprs-*.whl
 1. **Clone** each repo at the pinned ref (reuses existing checkouts unless `--clean`)
 2. **Create `.venv-ecosystem`** inside the checkout, install the repo's dev dependencies plus the httprs wheel
 3. **Baseline run**: pytest with real httpx (no shim)
-4. **Experiment run**: pytest with `ecosystem_conftest.py` injected via `-p _httprs_compat`, which replaces `sys.modules["httpx"]` with the shim before any test modules are imported
+4. **Experiment run**:
+   - create a temporary `httpx` package (`httpx/__init__.py`) from `httpx_compat.py`
+   - prepend that directory to `PYTHONPATH` so all `import httpx` resolve to httprs compat
+   - inject `ecosystem_conftest.py` via `-p _httprs_compat` as a fallback safety net
 5. **Diff**: `regressions = experiment_failing − baseline_failing`; always exits with code `0` (report only)
 
-### Auto-excluded tests
+### Current exclusions
 
-Tests that use unsupported transports are automatically converted to skips rather than failures:
+Only explicit path-based excludes are applied:
 
-- **ASGI/WSGI transports** (`ASGITransport`, `WSGITransport`): the shim stubs raise `NotImplementedError` on instantiation; the conftest plugin catches this and marks the test skipped
-- **Mock libraries** (`respx`, `pytest-httpx`): these patch httpx internals; `AttributeError`s from accessing `httpx._*` internals are caught and skipped
 - **Live API tests** (`tests/api_resources/`): both SDKs' `api_resources` directories make real network calls; excluded via `--ignore=tests/api_resources`
 
-### Known gaps covered by the shim
+### Intentional strictness
 
-| httpx feature | Shim approach |
-|---|---|
-| `params=` kwarg on all request methods | `_append_query_params()` prepends to URL before forwarding |
-| `response.history` | `Response` proxy wraps `httprs.Response` and adds `history = []` |
-| `httpx.codes.OK` etc. | Re-exported from `httprs.codes` (IntEnum) |
-| `from httpx._models import …` | Fake submodules registered in `sys.modules` |
-| `PoolTimeout`, `InvalidURL`, … | Aliased to nearest httprs exception |
-| `isinstance(client, httpx.Client)` | `Client` inherits from real `httpx.Client` (captured before shim injection) |
+- No fake `httpx._*` private submodules are registered.
+- No respx-specific module rewiring is performed in the harness.
+- Regressions are expected to surface as hard failures, then be fixed in Rust bindings/behavior.
+
+### Triage policy (current)
+
+- Do not investigate `respx`-based ecosystem failures right now.
+- Treat failures as `respx`-based when traces include `respx/plugin.py`, `respx/router.py`, `RESPX: some routes were not called!`, or connection errors to `127.0.0.1:4010` caused by missing interception.
+- Prioritize non-`respx` regressions (URL, request/response API, headers/cookies/query params, stream behavior, retry semantics, etc.).
+- Revisit `respx` parity only in a dedicated transport-interception effort; it is intentionally out of scope for normal regression reduction work.
+
+### Development loop
+
+1. Run `just ecosystem --repos <repo> --timeout <seconds> -v`
+2. Group regressions by root cause (API surface vs. behavior vs. transport/mocking)
+3. Implement fixes in Rust (`src/*.rs`) and keep `python/httprs/__init__.py` as a thin export wrapper
+4. Rebuild extension with `uvx maturin develop` and rerun the same ecosystem command
+5. Repeat until the regression group is reduced or eliminated
 
 ### CLI reference
 

@@ -109,6 +109,7 @@ class TestOutcome:
     skipped: int = 0
     exit_code: int = 0
     failing_tests: list[str] = field(default_factory=list)
+    failure_details: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -151,18 +152,25 @@ async def _run(
 def _parse_pytest_output(output: str, exit_code: int) -> TestOutcome:
     """Parse pytest -v --tb=line output into a TestOutcome."""
     failing: list[str] = []
+    details: dict[str, str] = {}
 
     for raw_line in output.splitlines():
         line = raw_line.strip()
         # "FAILED tests/foo.py::test_bar - SomeError: ..."
         if line.startswith("FAILED "):
-            node_id = line[7:].split(" - ")[0].strip()
+            parts = line[7:].split(" - ", 1)
+            node_id = parts[0].strip()
             failing.append(node_id)
+            if len(parts) > 1 and parts[1]:
+                details[node_id] = parts[1].strip()
         # "ERROR tests/foo.py::test_bar" (collection/setup errors)
         elif line.startswith("ERROR "):
-            node_id = line[6:].split(" - ")[0].strip()
+            parts = line[6:].split(" - ", 1)
+            node_id = parts[0].strip()
             if "::" in node_id or node_id.endswith(".py"):
                 failing.append(node_id)
+                if len(parts) > 1 and parts[1]:
+                    details[node_id] = parts[1].strip()
 
     # Parse summary: "== 12 passed, 3 failed, 1 error, 5 skipped in 4.20s =="
     passed = failed = error = skipped = 0
@@ -189,6 +197,7 @@ def _parse_pytest_output(output: str, exit_code: int) -> TestOutcome:
         skipped=skipped,
         exit_code=exit_code,
         failing_tests=failing,
+        failure_details=details,
     )
 
 
@@ -235,6 +244,24 @@ async def _setup_venv(
     if venv_dir.exists():
         if verbose:
             print(f"  Reusing venv: {venv_dir}", flush=True)
+        python_bin = venv_dir / "bin" / "python"
+        if verbose:
+            print("  Reinstalling httprs wheel...", flush=True)
+        rc, out = await _run(
+            [
+                "uv",
+                "pip",
+                "install",
+                "--python",
+                str(python_bin),
+                "--force-reinstall",
+                str(wheel_path),
+            ],
+            cwd=checkout_dir,
+            verbose=verbose,
+        )
+        if rc != 0:
+            raise RuntimeError(f"uv pip install (wheel reinstall) failed:\n{out}")
         return venv_dir
 
     python_bin = venv_dir / "bin" / "python"
@@ -301,7 +328,15 @@ async def _setup_venv(
     if verbose:
         print("  Installing httprs wheel...", flush=True)
     rc, out = await _run(
-        ["uv", "pip", "install", "--python", str(python_bin), str(wheel_path)],
+        [
+            "uv",
+            "pip",
+            "install",
+            "--python",
+            str(python_bin),
+            "--force-reinstall",
+            str(wheel_path),
+        ],
         cwd=checkout_dir,
         verbose=verbose,
     )
@@ -339,12 +374,19 @@ async def _run_pytest(
     try:
         if inject_compat:
             tmpdir = tempfile.mkdtemp(prefix="httprs-conftest-")
+            tmp_path = Path(tmpdir)
+            # Build-layer injection: publish a temporary "httpx" package on
+            # PYTHONPATH so any early plugin import resolves to httprs compat
+            # without runtime sys.modules rewrites.
+            httpx_pkg = tmp_path / "httpx"
+            httpx_pkg.mkdir(parents=True, exist_ok=True)
+            shutil.copy(REPO_ROOT / "httpx_compat.py", httpx_pkg / "__init__.py")
+
             # Named _httprs_compat (not conftest.py) so pytest loads it via -p,
-            # not via its own conftest.py discovery (which only finds files named
-            # "conftest.py" in directories on the test path).
-            shutil.copy(ECOSYSTEM_CONFTEST, Path(tmpdir) / "_httprs_compat.py")
+            # not via its own conftest.py discovery.
+            shutil.copy(ECOSYSTEM_CONFTEST, tmp_path / "_httprs_compat.py")
             env["PYTHONPATH"] = tmpdir + os.pathsep + env.get("PYTHONPATH", "")
-            env["HTTPRS_COMPAT_SHIM"] = str(REPO_ROOT / "httpx_compat.py")
+            env["HTTPRS_COMPAT_SHIM"] = str(httpx_pkg / "__init__.py")
             cmd += ["-p", "_httprs_compat"]
 
         rc, output = await _run(
@@ -382,7 +424,7 @@ async def _build_wheel(verbose: bool) -> Path:
     if verbose:
         print("Building httprs release wheel...", flush=True)
     rc, out = await _run(
-        ["uvx", "maturin", "build", "--release"],
+        ["uvx", "maturin", "build"],
         cwd=REPO_ROOT,
         verbose=verbose,
     )
@@ -556,7 +598,11 @@ def _format_report(diffs: list[RepoDiff], args: argparse.Namespace) -> tuple[str
             if args.verbose:
                 lines.append(f"#### Regressions ({n} test{'s' if n != 1 else ''})")
                 for t in diff.regressions:
-                    lines.append(f"- {t}")
+                    detail = diff.experiment.failure_details.get(t)
+                    if detail:
+                        lines.append(f"- {t} — {detail}")
+                    else:
+                        lines.append(f"- {t}")
                 lines.append("")
 
         if diff.improvements and args.verbose:
