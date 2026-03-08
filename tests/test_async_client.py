@@ -154,3 +154,57 @@ async def test_context_manager_closes_client():
     # After exiting, further calls should raise
     with pytest.raises(RuntimeError):
         await client.get("http://example.com/")
+
+
+@pytest.mark.anyio
+async def test_aclose_closes_client(server):
+    client = httprs.AsyncClient()
+    assert client.is_closed is False
+    await client.aclose()
+    assert client.is_closed is True
+    with pytest.raises(RuntimeError):
+        await client.get(server.url)
+
+
+@pytest.mark.anyio
+async def test_send_uses_sync_only_transport():
+    class SyncOnlyTransport:
+        def handle_request(self, request):
+            return httprs.Response(209, text="sync-only", request=request)
+
+    async with httprs.AsyncClient(transport=SyncOnlyTransport()) as client:
+        request = client.build_request("GET", "https://example.com/")
+        response = await client.send(request)
+
+    assert response.status_code == 209
+    assert response.text == "sync-only"
+
+
+@pytest.mark.anyio
+async def test_send_prefers_handle_async_request_over_handle_request():
+    class DualTransport:
+        def handle_request(self, request):
+            return httprs.Response(599, text="sync-path", request=request)
+
+        async def handle_async_request(self, request):
+            return httprs.Response(210, text="async-path", request=request)
+
+    async with httprs.AsyncClient(transport=DualTransport()) as client:
+        request = client.build_request("GET", "https://example.com/")
+        response = await client.send(request)
+
+    assert response.status_code == 210
+    assert response.text == "async-path"
+
+
+@pytest.mark.anyio
+async def test_subclass_super_init_kwargs(server):
+    class WrappedAsyncClient(httprs.AsyncClient):
+        def __init__(self, **kwargs):
+            kwargs.setdefault("follow_redirects", True)
+            super().__init__(**kwargs)
+
+    async with WrappedAsyncClient(timeout=1.0) as client:
+        response = await client.get(server.url)
+
+    assert response.status_code == 200
