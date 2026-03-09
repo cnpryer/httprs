@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+import json
 
 import pytest
 import httprs
@@ -43,6 +44,43 @@ async def test_post_json(server):
     async with httprs.AsyncClient() as client:
         response = await client.post(server.url, json={"text": "Hello, world!"})
     assert response.status_code == 200
+
+
+@pytest.mark.anyio
+async def test_post_json_compact_utf8_encoding(server):
+    payload = {"text": "héllo", "n": 1}
+    async with httprs.AsyncClient() as client:
+        response = await client.post(server.url + "/echo_body", json=payload)
+    assert response.status_code == 200
+    assert response.content == b'{"text":"h\xc3\xa9llo","n":1}'
+
+
+@pytest.mark.anyio
+async def test_post_json_rejects_non_finite_float(server):
+    async with httprs.AsyncClient() as client:
+        with pytest.raises(ValueError, match="not JSON compliant"):
+            await client.post(server.url, json={"value": float("nan")})
+
+
+@pytest.mark.anyio
+async def test_post_json_coerces_supported_dict_keys(server):
+    async with httprs.AsyncClient() as client:
+        response = await client.post(
+            server.url + "/echo_body",
+            json={False: 1, None: 2, 3: 4, 1.5: 5},
+        )
+    assert response.status_code == 200
+    assert json.loads(response.content) == {"false": 1, "null": 2, "3": 4, "1.5": 5}
+
+
+@pytest.mark.anyio
+async def test_post_json_with_pre_serialized_string_is_encoded_as_json_string(server):
+    payload = json.dumps({"text": "Hello"})
+    async with httprs.AsyncClient() as client:
+        response = await client.post(server.url + "/echo_body", json=payload)
+    assert response.status_code == 200
+    assert json.loads(response.content) == payload
+    assert json.loads(json.loads(response.content)) == {"text": "Hello"}
 
 
 @pytest.mark.anyio

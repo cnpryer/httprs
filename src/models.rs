@@ -1,3 +1,4 @@
+use crate::json::json_dumps;
 use crate::transports::PySyncByteStream;
 use pyo3::exceptions::{PyKeyError, PyTypeError, PyUnicodeDecodeError, PyValueError};
 use pyo3::prelude::*;
@@ -98,17 +99,8 @@ fn append_body_chunk(item: &Bound<'_, PyAny>, out: &mut Vec<u8>) -> PyResult<()>
     Ok(())
 }
 
-fn encode_json_body(py: Python<'_>, value: &Bound<'_, PyAny>) -> PyResult<Vec<u8>> {
-    let json = py.import("json")?;
-    let kwargs = PyDict::new(py);
-    kwargs.set_item("ensure_ascii", false)?;
-    kwargs.set_item("separators", (",", ":"))?;
-    kwargs.set_item("allow_nan", false)?;
-    let dumped: String = json
-        .getattr("dumps")?
-        .call((value,), Some(&kwargs))?
-        .extract()?;
-    Ok(dumped.into_bytes())
+fn encode_json_body(value: &Bound<'_, PyAny>) -> PyResult<Vec<u8>> {
+    Ok(json_dumps(value)?.into_bytes())
 }
 
 fn immediate_awaitable<'py>(py: Python<'py>, value: Py<PyAny>) -> PyResult<Bound<'py, PyAny>> {
@@ -1041,7 +1033,7 @@ impl PyResponse {
                     ));
                 }
             } else if let Some(json_obj) = json {
-                body = encode_json_body(py, json_obj.bind(py))?;
+                body = encode_json_body(json_obj.bind(py))?;
                 if headers.get("content-length", None).is_none() {
                     headers
                         .inner

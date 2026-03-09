@@ -6,6 +6,7 @@ pub mod auth;
 pub mod client;
 pub mod config;
 pub mod cookies;
+pub mod json;
 pub mod models;
 pub mod proxy;
 pub mod query_params;

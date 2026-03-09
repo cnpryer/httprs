@@ -1,5 +1,6 @@
 use crate::auth::{PyBasicAuth, PyDigestAuth};
 use crate::config::{PyLimits, PyTimeout};
+use crate::json::json_dumps;
 use crate::models::{version_str, PyHeaders, PyRequest, PyResponse, ResponseStream};
 use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
@@ -24,10 +25,7 @@ fn build_body(
         return Ok(RequestBody::Bytes(bytes));
     }
     if let Some(json_obj) = json {
-        let json_mod = py.import("json")?;
-        let json_str: String = json_mod
-            .call_method1("dumps", (json_obj.bind(py),))?
-            .extract()?;
+        let json_str = json_dumps(json_obj.bind(py))?;
         return Ok(RequestBody::Json(json_str));
     }
     if let Some(data_obj) = data {
@@ -1283,10 +1281,7 @@ impl PyClient {
                 let multipart_data = data.or(json);
                 body_content = build_multipart_body(py, multipart_data, files, &boundary)?;
             } else if let Some(json_obj) = json {
-                let json_mod = py.import("json")?;
-                let json_str: String = json_mod
-                    .call_method1("dumps", (json_obj.bind(py),))?
-                    .extract()?;
+                let json_str = json_dumps(json_obj.bind(py))?;
                 body_content = json_str.into_bytes();
                 if merged_headers.get("content-type", None).is_none() {
                     merged_headers
@@ -1869,10 +1864,7 @@ impl PyAsyncClient {
         let body_bytes: Option<Vec<u8>> = if let Some(bytes) = content {
             Some(bytes)
         } else if let Some(ref json_obj) = json {
-            let json_mod = py.import("json")?;
-            let json_str: String = json_mod
-                .call_method1("dumps", (json_obj.bind(py),))?
-                .extract()?;
+            let json_str = json_dumps(json_obj.bind(py))?;
             Some(json_str.into_bytes())
         } else {
             None
@@ -2195,10 +2187,7 @@ impl PyAsyncClient {
                 let multipart_data = data.or(json);
                 body_content = build_multipart_body(py, multipart_data, files, &boundary)?;
             } else if let Some(json_obj) = json {
-                let json_mod = py.import("json")?;
-                let json_str: String = json_mod
-                    .call_method1("dumps", (json_obj.bind(py),))?
-                    .extract()?;
+                let json_str = json_dumps(json_obj.bind(py))?;
                 body_content = json_str.into_bytes();
                 if merged_headers.get("content-type", None).is_none() {
                     merged_headers
