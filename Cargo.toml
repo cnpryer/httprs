@@ -1,6 +1,6 @@
 [package]
 name = "httprs"
-version = "0.0.1-alpha.5"
+version = "0.0.1-alpha.6"
 edition = "2021"
 description = "An experimental HTTP library for Python built with Rust"
 license = "MIT"
