@@ -92,12 +92,38 @@ REPOS: list[Repository] = [
             "time-machine",
         ),
     ),
+    Repository(
+        "python-telegram-bot",
+        "python-telegram-bot",
+        "master",
+        pytest_args=(
+            # Expand coverage beyond request internals to include
+            # ApplicationBuilder's HTTPXRequest/httpx integration.
+            "tests/request",
+            "tests/ext/test_applicationbuilder.py",
+            "--override-ini=addopts=",
+            # Keep this subset offline/stable in CI and local runs.
+            "-m",
+            "no_req",
+            "--timeout=10",
+        ),
+        install_extras=".",
+        extra_pip=(
+            "pytest-asyncio",
+            "pytest-timeout",
+            "flaky",
+            "beautifulsoup4",
+            "tzdata",
+            "pytz",
+        ),
+    ),
 ]
 
 # Keys used on the CLI (short names) and the long repo name.
 _REPO_BY_KEY: dict[str, Repository] = {
     "openai": REPOS[0],
     "anthropic": REPOS[1],
+    "python-telegram-bot": REPOS[2],
 }
 
 
@@ -189,6 +215,16 @@ def _parse_pytest_output(output: str, exit_code: int) -> TestOutcome:
                 elif "skip" in label:
                     skipped = n
 
+    # Some pytest failures occur before test collection (e.g. conftest import errors),
+    # so no summary line exists. Preserve this as a session-level error signal.
+    if passed == 0 and failed == 0 and error == 0 and skipped == 0 and exit_code != 0:
+        error = 1
+        if "__session__" not in failing:
+            failing.append("__session__")
+        first_line = next((ln.strip() for ln in output.splitlines() if ln.strip()), "")
+        if first_line:
+            details.setdefault("__session__", first_line)
+
     return TestOutcome(
         passed=passed,
         failed=failed,
@@ -240,34 +276,24 @@ async def _setup_venv(
     verbose: bool,
 ) -> Path:
     venv_dir = checkout_dir / ".venv-ecosystem"
-    if venv_dir.exists():
+    reuse_venv = venv_dir.exists()
+    python_bin = venv_dir / "bin" / "python"
+
+    if reuse_venv:
         if verbose:
             print(f"  Reusing venv: {venv_dir}", flush=True)
-        python_bin = venv_dir / "bin" / "python"
-        if verbose:
-            print("  Reinstalling httprs wheel...", flush=True)
+    else:
+        # Ensure the target venv exists before sync/fallback install steps.
         rc, out = await _run(
-            [
-                "uv",
-                "pip",
-                "install",
-                "--python",
-                str(python_bin),
-                "--force-reinstall",
-                str(wheel_path),
-            ],
+            ["uv", "venv", "--python", "3.12", str(venv_dir)],
             cwd=checkout_dir,
             verbose=verbose,
         )
         if rc != 0:
-            raise RuntimeError(f"uv pip install (wheel reinstall) failed:\n{out}")
-        return venv_dir
+            raise RuntimeError(f"uv venv failed:\n{out}")
 
-    python_bin = venv_dir / "bin" / "python"
-
-    # Try `uv sync` first — it installs [dependency-groups] (e.g. dev) that
-    # `uv pip install` silently skips.  UV_PROJECT_ENVIRONMENT redirects the
-    # venv from the default `.venv` to our `.venv-ecosystem`.
+    # Always refresh dependencies, even on a reused venv.
+    # This avoids stale environments when repo test deps change between runs.
     if verbose:
         print("  Syncing dependencies (uv sync)...", flush=True)
     sync_env = {**os.environ, "UV_PROJECT_ENVIRONMENT": str(venv_dir)}
@@ -284,14 +310,6 @@ async def _setup_venv(
                 f"  uv sync failed; falling back to pip install {repo.install_extras}...",
                 flush=True,
             )
-        rc, out = await _run(
-            ["uv", "venv", "--python", "3.12", str(venv_dir)],
-            cwd=checkout_dir,
-            verbose=verbose,
-        )
-        if rc != 0:
-            raise RuntimeError(f"uv venv failed:\n{out}")
-
         rc, out = await _run(
             ["uv", "pip", "install", "--python", str(python_bin), repo.install_extras],
             cwd=checkout_dir,
@@ -407,8 +425,10 @@ def _compute_diff(
     baseline: TestOutcome,
     experiment: TestOutcome,
 ) -> RepoDiff:
-    b_fail = set(baseline.failing_tests)
-    e_fail = set(experiment.failing_tests)
+    # Session-level sentinels are used for crash diagnostics, but they do not
+    # map to stable test node IDs and should not be counted as regressions.
+    b_fail = {t for t in baseline.failing_tests if t != "__session__"}
+    e_fail = {t for t in experiment.failing_tests if t != "__session__"}
     return RepoDiff(
         repo=repo,
         baseline=baseline,
@@ -428,16 +448,47 @@ async def _build_wheel(verbose: bool) -> Path:
     )
     if rc != 0:
         raise RuntimeError(f"maturin build failed:\n{out}")
-    wheels = sorted(
-        (REPO_ROOT / "target" / "wheels").glob("httprs-*.whl"),
-        key=lambda p: p.stat().st_mtime,
-    )
+    wheels = sorted((REPO_ROOT / "target" / "wheels").glob("httprs-*.whl"))
     if not wheels:
         raise RuntimeError("No wheel found in target/wheels/ after build.")
-    wheel = wheels[-1]
+    compatible = _compatible_wheels(wheels)
+    if not compatible:
+        candidates = "\n".join(f"- {w.name}" for w in wheels)
+        raise RuntimeError(
+            "No compatible wheel found for this Python interpreter.\n"
+            f"Available wheels:\n{candidates}"
+        )
+
+    # Pick the newest compatible wheel by mtime.
+    wheel = max(compatible, key=lambda p: p.stat().st_mtime)
     if verbose:
         print(f"  Wheel: {wheel.name}", flush=True)
     return wheel
+
+
+def _compatible_wheels(wheels: list[Path]) -> list[Path]:
+    """Return wheels compatible with the current Python interpreter."""
+    try:
+        from packaging.tags import sys_tags
+        from packaging.utils import parse_wheel_filename
+    except Exception:
+        # Conservative fallback: prefer abi3/current-interpreter tags by filename.
+        version_tag = f"cp{sys.version_info.major}{sys.version_info.minor}"
+        selected = [
+            w for w in wheels if f"-{version_tag}-" in w.name or "-abi3-" in w.name
+        ]
+        return selected if selected else wheels
+
+    supported = set(sys_tags())
+    compatible: list[Path] = []
+    for wheel in wheels:
+        try:
+            _, _, _, tags = parse_wheel_filename(wheel.name)
+        except Exception:
+            continue
+        if any(tag in supported for tag in tags):
+            compatible.append(wheel)
+    return compatible
 
 
 async def _process_repo(
@@ -462,6 +513,10 @@ async def _process_repo(
                 extra_env["OPENAI_API_KEY"] = "fake"
             if repo.repo == "anthropic-sdk-python":
                 extra_env["ANTHROPIC_API_KEY"] = "fake"
+            if repo.repo == "python-telegram-bot":
+                # Keep CI/local behavior aligned with the expanded subset:
+                # include optional-dependency pathways used by ApplicationBuilder tests.
+                extra_env["TEST_WITH_OPT_DEPS"] = "true"
 
             if args.no_baseline:
                 if args.verbose:
@@ -553,6 +608,17 @@ def _format_regression_rate(regressions: int, baseline: TestOutcome) -> str:
     return f"{regressions} ({pct:.1f}%)"
 
 
+def _remaining_regression_count(diff: RepoDiff) -> int:
+    """Lower bound for remaining regressions.
+
+    `len(diff.regressions)` is based on node-id set diff, but that can undercount
+    if pytest crashes before collection. In that case, fall back to pass-count gap.
+    """
+    known_regressions = len(diff.regressions)
+    pass_gap = max(0, diff.baseline.passed - diff.experiment.passed)
+    return max(known_regressions, pass_gap)
+
+
 def _format_report(diffs: list[RepoDiff], args: argparse.Namespace) -> tuple[str, int]:
     lines: list[str] = []
     today = datetime.date.today().isoformat()
@@ -583,7 +649,7 @@ def _format_report(diffs: list[RepoDiff], args: argparse.Namespace) -> tuple[str
         ]
         for diff in diffs:
             label = f"{diff.repo.org}/{diff.repo.repo}"
-            regressions = len(diff.regressions)
+            regressions = _remaining_regression_count(diff)
             lines.append(
                 f"| {label} "
                 f"| httpx "
@@ -623,7 +689,7 @@ def _format_report(diffs: list[RepoDiff], args: argparse.Namespace) -> tuple[str
                 lines.append(f"| {stat} | {b} | {e} |")
             lines.append(
                 f"| remaining regressions | - | "
-                f"{_format_regression_rate(len(diff.regressions), diff.baseline)} |"
+                f"{_format_regression_rate(_remaining_regression_count(diff), diff.baseline)} |"
             )
 
         lines.append("")
@@ -658,7 +724,7 @@ def _format_report(diffs: list[RepoDiff], args: argparse.Namespace) -> tuple[str
                 f"| {label} "
                 f"| {diff.baseline.passed} "
                 f"| {diff.experiment.passed} "
-                f"| {_format_regression_rate(len(diff.regressions), diff.baseline)} |"
+                f"| {_format_regression_rate(_remaining_regression_count(diff), diff.baseline)} |"
             )
         lines.append("")
 
@@ -682,7 +748,7 @@ async def main() -> int:
         nargs="+",
         choices=list(_REPO_BY_KEY),
         metavar="REPO",
-        help="Repos to test (default: all). Choices: openai, anthropic",
+        help="Repos to test (default: all).",
     )
     parser.add_argument(
         "--httprs-wheel",

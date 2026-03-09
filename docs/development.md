@@ -90,6 +90,7 @@ Ecosystem tests measure real-world httpx API compatibility by cloning third-part
 |---|---|
 | `anthropic` | `anthropics/anthropic-sdk-python` |
 | `openai` | `openai/openai-python` |
+| `python-telegram-bot` | `python-telegram-bot/python-telegram-bot` |
 
 ### Quick start
 
@@ -161,7 +162,7 @@ just ecosystem [options]
 # or: python check_ecosystem.py [options]
 
   --checkouts-dir PATH   Directory for repo checkouts (default: /tmp/httprs-ecosystem)
-  --repos REPO …         Subset to run: openai, anthropic (default: all)
+  --repos REPO …         Subset to run: openai, anthropic, python-telegram-bot (default: all)
   --httprs-wheel PATH    Use a pre-built wheel instead of running maturin build
   --no-baseline          Skip the httpx baseline; only report httprs pass/fail counts
   --clean                Wipe existing checkouts before cloning
@@ -218,6 +219,16 @@ CI triggers on push to `main` and on all pull requests.
 - Use [uv documentation](https://docs.astral.sh/uv/) as the source of truth for Python environment and dependency workflows.
 - Add Rust dependencies in `Cargo.toml`, then run `cargo build` to update `Cargo.lock`.
 - Add Python dev dependencies to the `dev` group in `pyproject.toml` (for example: `uv add --group dev <package>`).
+
+### Cache management
+
+Use [`UV_CACHE_DIR`](https://docs.astral.sh/uv/reference/environment/#uv_cache_dir) to specify a custom cache directory.
+
+```
+UV_CACHE_DIR=/path/to/cache uv sync
+```
+
+Visit [uv's docs](https://docs.astral.sh/uv) for more.
 
 ---
 
