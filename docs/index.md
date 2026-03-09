@@ -20,6 +20,22 @@ httprs is a Python package distributed as a compiled wheel. The HTTP logic is wr
 2. Continuously benchmark against popular HTTP libraries with full transparency.
 3. Minimize complexity and create an intuitive and inviting experience for developers.
 
+## Ecosystem compatibility
+
+| repo | baseline package | baseline passed | compat passed | accepted regressions | remaining real regressions | total score |
+|---|---|---|---|---|---|---|
+| openai/openai-python | httpx | 559 | 462 | 96 (17.2%) | 1 (0.2%) | 558/559 (99.8%) |
+| anthropics/anthropic-sdk-python | httpx | 583 | 484 | 89 (15.3%) | 10 (1.7%) | 573/583 (98.3%) |
+| python-telegram-bot/python-telegram-bot | httpx | 94 | 94 | 0 (0.0%) | 0 (0.0%) | 94/94 (100.0%) |
+
+Reproduce with:
+
+```bash
+just ecosystem
+```
+
+The ecosystem tests are still a WIP. [Submit an issue](https://github.com/cnpryer/httprs/issues/new) or PR if the accepted regressions look incorrect, or if you have a suggestion for improving compatibility.
+
 ## Quick start
 
 ```python

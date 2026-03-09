@@ -1,6 +1,9 @@
 dbuild:
     @uvx maturin develop
 
+rbuild:
+    @uvx maturin develop --release
+
 sync:
     @uv sync --all-groups --dev
 
@@ -18,8 +21,7 @@ bump version:
     @uv run --no-sync bump.py --version {{version}}
     @uv lock
 
-bench:
-    @uvx maturin develop --release
+bench: rbuild
     @uv run --no-sync --with httpx --with requests benchmark.py --packages httpx requests -n 5000
 
 ecosystem *args: dbuild
