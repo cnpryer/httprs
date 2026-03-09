@@ -109,6 +109,23 @@ impl PyHTTPTransport {
         Ok(Self { inner: Some(inner) })
     }
 
+    // TODO(cnpryer):
+    //
+    // ```python
+    // class Transport(httprs.HTTPTransport):
+    //     def __init__(self, **kwargs) -> None:
+    //         kwargs.setdefault("field", None)
+    //         super().__init__(**kwargs)
+    // ```
+    #[pyo3(signature = (*_args, **_kwargs))]
+    fn __init__(
+        _slf: &Bound<'_, Self>,
+        _args: &Bound<'_, PyTuple>,
+        _kwargs: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<()> {
+        Ok(())
+    }
+
     pub fn handle_request(&self, request: &PyRequest) -> PyResult<PyResponse> {
         let client = self
             .inner
@@ -156,6 +173,23 @@ impl PyAsyncHTTPTransport {
             .build()
             .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
         Ok(Self { inner: Some(inner) })
+    }
+
+    // TODO(cnpryer):
+    //
+    // ```python
+    // class Transport(httprs.AsyncHTTPTransport):
+    //     def __init__(self, **kwargs) -> None:
+    //         kwargs.setdefault("field", None)
+    //         super().__init__(**kwargs)
+    // ```
+    #[pyo3(signature = (*_args, **_kwargs))]
+    fn __init__(
+        _slf: &Bound<'_, Self>,
+        _args: &Bound<'_, PyTuple>,
+        _kwargs: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<()> {
+        Ok(())
     }
 
     pub fn handle_async_request<'py>(

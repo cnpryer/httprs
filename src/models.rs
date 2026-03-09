@@ -56,6 +56,31 @@ fn collect_body_bytes(py: Python<'_>, content: Option<Py<PyAny>>) -> PyResult<Ve
     Ok(out)
 }
 
+fn parse_request_content(
+    py: Python<'_>,
+    content: Option<Py<PyAny>>,
+) -> PyResult<(Vec<u8>, Option<Py<PyAny>>)> {
+    let Some(content) = content else {
+        return Ok((Vec::new(), None));
+    };
+    let bound = content.bind(py);
+    if let Ok(bytes) = bound.cast::<PyBytes>() {
+        return Ok((bytes.as_bytes().to_vec(), None));
+    }
+    if let Ok(bytearray) = bound.cast::<PyByteArray>() {
+        return Ok((bytearray.to_vec(), None));
+    }
+    if let Ok(text) = bound.extract::<String>() {
+        return Ok((text.into_bytes(), None));
+    }
+    if bound.hasattr("__iter__")? {
+        return Ok((Vec::new(), Some(content)));
+    }
+    Err(PyTypeError::new_err(
+        "content must be bytes, bytearray, str, or an iterable of byte chunks",
+    ))
+}
+
 fn append_body_chunk(item: &Bound<'_, PyAny>, out: &mut Vec<u8>) -> PyResult<()> {
     if let Ok(bytes) = item.cast::<PyBytes>() {
         out.extend_from_slice(bytes.as_bytes());
@@ -557,17 +582,20 @@ pub struct PyRequest {
     pub url: PyURL,
     pub headers: PyHeaders,
     pub content: Vec<u8>,
+    pub py_stream: Option<Py<PyAny>>,
     pub extensions: Py<PyAny>,
 }
 
 impl Clone for PyRequest {
     fn clone(&self) -> Self {
         let extensions = Python::attach(|py| self.extensions.clone_ref(py));
+        let py_stream = Python::attach(|py| self.py_stream.as_ref().map(|s| s.clone_ref(py)));
         Self {
             method: self.method.clone(),
             url: self.url.clone(),
             headers: self.headers.clone(),
             content: self.content.clone(),
+            py_stream,
             extensions,
         }
     }
@@ -611,11 +639,13 @@ impl PyRequest {
             Some(ext) => ext,
             None => PyDict::new(py).into_any().unbind(),
         };
+        let (parsed_content, parsed_stream) = parse_request_content(py, content)?;
         Ok(PyRequest {
             method: method.to_uppercase(),
             url: parsed_url,
             headers: parsed_headers,
-            content: collect_body_bytes(py, content)?,
+            content: parsed_content,
+            py_stream: parsed_stream,
             extensions: parsed_extensions,
         })
     }
@@ -646,22 +676,36 @@ impl PyRequest {
     }
 
     #[getter]
-    pub fn stream<'py>(&self, py: Python<'py>) -> PyResult<Py<PySyncByteStream>> {
-        Py::new(
+    pub fn stream(&self, py: Python<'_>) -> PyResult<PyObject> {
+        if let Some(stream) = &self.py_stream {
+            return Ok(stream.clone_ref(py));
+        }
+        let stream = Py::new(
             py,
             PySyncByteStream {
                 content: self.content.clone(),
                 consumed: false,
             },
-        )
+        )?;
+        Ok(stream.into_bound(py).into_any().unbind())
     }
 
-    pub fn read(&self) -> Vec<u8> {
-        self.content.clone()
+    pub fn read(&self, py: Python<'_>) -> PyResult<Vec<u8>> {
+        if let Some(stream) = &self.py_stream {
+            let bound = stream.bind(py);
+            let mut out = Vec::new();
+            for item in bound.try_iter()? {
+                let item = item?;
+                append_body_chunk(&item, &mut out)?;
+            }
+            Ok(out)
+        } else {
+            Ok(self.content.clone())
+        }
     }
 
     pub fn aread<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        let bytes = PyBytes::new(py, &self.content).into_any().unbind();
+        let bytes = PyBytes::new(py, &self.read(py)?).into_any().unbind();
         immediate_awaitable(py, bytes)
     }
 
