@@ -563,14 +563,41 @@ def _format_report(diffs: list[RepoDiff], args: argparse.Namespace) -> tuple[str
     except Exception:
         version = "unknown"
 
-    if args.verbose:
-        lines += [
-            "## Ecosystem Compatibility Report",
-            f"httprs v{version} | {today}",
-            "",
-        ]
+    if not args.verbose:
+        if args.no_baseline:
+            lines += [
+                "| repo | passed | failed | error | skipped |",
+                "|---|---|---|---|---|",
+            ]
+            for diff in diffs:
+                label = f"{diff.repo.org}/{diff.repo.repo}"
+                e = diff.experiment
+                lines.append(
+                    f"| {label} | {e.passed} | {e.failed} | {e.error} | {e.skipped} |"
+                )
+            return "\n".join(lines), 0
 
-    total_regressions = 0
+        lines += [
+            "| repo | baseline package | baseline passed | compat passed | remaining regressions |",
+            "|---|---|---|---|---|",
+        ]
+        for diff in diffs:
+            label = f"{diff.repo.org}/{diff.repo.repo}"
+            regressions = len(diff.regressions)
+            lines.append(
+                f"| {label} "
+                f"| httpx "
+                f"| {diff.baseline.passed} "
+                f"| {diff.experiment.passed} "
+                f"| {_format_regression_rate(regressions, diff.baseline)} |"
+            )
+        return "\n".join(lines), 0
+
+    lines += [
+        "## Ecosystem Compatibility Report",
+        f"httprs v{version} | {today}",
+        "",
+    ]
 
     for diff in diffs:
         label = f"{diff.repo.org}/{diff.repo.repo}"
@@ -603,25 +630,22 @@ def _format_report(diffs: list[RepoDiff], args: argparse.Namespace) -> tuple[str
 
         if diff.regressions:
             n = len(diff.regressions)
-            total_regressions += n
-            if args.verbose:
-                lines.append(f"#### Regressions ({n} test{'s' if n != 1 else ''})")
-                for t in diff.regressions:
-                    detail = diff.experiment.failure_details.get(t)
-                    if detail:
-                        lines.append(f"- {t} — {detail}")
-                    else:
-                        lines.append(f"- {t}")
-                lines.append("")
+            lines.append(f"#### Regressions ({n} test{'s' if n != 1 else ''})")
+            for t in diff.regressions:
+                detail = diff.experiment.failure_details.get(t)
+                if detail:
+                    lines.append(f"- {t} — {detail}")
+                else:
+                    lines.append(f"- {t}")
+            lines.append("")
 
-        if not args.no_baseline and diff.pre_existing and args.verbose:
+        if not args.no_baseline and diff.pre_existing:
             n = len(diff.pre_existing)
             lines.append(f"#### Pre-existing failures ({n} tests)")
             for t in diff.pre_existing:
                 lines.append(f"- {t}")
             lines.append("")
 
-    # Cross-repo summary table (only meaningful with multiple repos + baseline).
     if len(diffs) > 1 and not args.no_baseline:
         lines += [
             "### Summary",
