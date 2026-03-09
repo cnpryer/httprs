@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+import json
 
 import pytest
 import httprs
@@ -215,6 +216,20 @@ class TestResponse:
         r = httprs.Response(200, content=b'{"val": null}')
         data = r.json()
         assert data["val"] is None
+
+    def test_json_argument_compact_utf8_encoding(self):
+        r = httprs.Response(200, json={"text": "héllo", "n": 1})
+        assert r.content == b'{"text":"h\xc3\xa9llo","n":1}'
+
+    def test_json_argument_rejects_non_finite_float(self):
+        with pytest.raises(ValueError, match="not JSON compliant"):
+            httprs.Response(200, json={"value": float("nan")})
+
+    def test_json_argument_with_pre_serialized_string_is_json_string(self):
+        payload = json.dumps({"text": "Hello"})
+        r = httprs.Response(200, json=payload)
+        assert r.json() == payload
+        assert json.loads(r.json()) == {"text": "Hello"}
 
     def test_raise_for_status_ok(self):
         r = httprs.Response(200, content=b"OK")
