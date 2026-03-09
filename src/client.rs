@@ -339,6 +339,13 @@ fn extract_auth(py: Python<'_>, auth: &Py<PyAny>) -> PyResult<AuthKind> {
     Err(PyValueError::new_err("Unsupported auth type"))
 }
 
+fn clone_auth_kind(py: Python<'_>, auth: &AuthKind) -> AuthKind {
+    match auth {
+        AuthKind::Basic(header) => AuthKind::Basic(header.clone()),
+        AuthKind::Digest(digest) => AuthKind::Digest(digest.clone_ref(py)),
+    }
+}
+
 fn build_blocking_request(
     client: &reqwest::blocking::Client,
     method: &str,
@@ -1350,13 +1357,24 @@ impl PyClient {
         auth: Option<Py<PyAny>>,
         follow_redirects: Option<bool>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let _ = auth;
-
+        let req_auth = match auth {
+            Some(ref a) => Some(extract_auth(py, a)?),
+            None => None,
+        };
+        let default_auth = {
+            let this = slf.borrow();
+            this.default_auth.as_ref().map(|a| clone_auth_kind(py, a))
+        };
+        let effective_auth = req_auth.or(default_auth);
         let request_obj = Py::new(py, request.clone())?;
         let transport_obj: Option<Py<PyAny>> = {
             let this = slf.borrow();
             this.transport.as_ref().map(|t| t.clone_ref(py))
         };
+        if let Some(AuthKind::Basic(header_val)) = &effective_auth {
+            let mut req_mut = request_obj.bind(py).borrow_mut();
+            req_mut.set_header("authorization", header_val);
+        }
         if let Some(transport) = transport_obj {
             let transport_bound = transport.into_bound(py).into_any();
             if transport_bound.hasattr("handle_request")? {
@@ -1389,7 +1407,11 @@ impl PyClient {
         };
         let method_str = request.method.clone();
         let url = request.url.inner.to_string();
-        let headers: Vec<(String, String)> = request.headers.inner.clone();
+        let mut headers: Vec<(String, String)> = request.headers.inner.clone();
+        if let Some(AuthKind::Basic(header_val)) = &effective_auth {
+            headers.retain(|(k, _)| k != "authorization");
+            headers.push(("authorization".to_string(), header_val.clone()));
+        }
         let body = if request.content.is_empty() && request.py_stream.is_none() {
             None
         } else {
@@ -2246,13 +2268,25 @@ impl PyAsyncClient {
         auth: Option<Py<PyAny>>,
         follow_redirects: Option<bool>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let _ = auth;
+        let req_auth = match auth {
+            Some(ref a) => Some(extract_auth(py, a)?),
+            None => None,
+        };
+        let default_auth = {
+            let this = slf.borrow();
+            this.default_auth.as_ref().map(|a| clone_auth_kind(py, a))
+        };
+        let effective_auth = req_auth.or(default_auth);
         let request_obj = Py::new(py, request.clone())?;
 
         let transport_obj: Option<Py<PyAny>> = {
             let this = slf.borrow();
             this.transport.as_ref().map(|t| t.clone_ref(py))
         };
+        if let Some(AuthKind::Basic(header_val)) = &effective_auth {
+            let mut req_mut = request_obj.bind(py).borrow_mut();
+            req_mut.set_header("authorization", header_val);
+        }
         if let Some(transport) = transport_obj {
             let transport_bound = transport.into_bound(py).into_any();
             if transport_bound.hasattr("handle_async_request")? {
@@ -2289,7 +2323,11 @@ impl PyAsyncClient {
         };
         let method_str = request.method.clone();
         let url = request.url.inner.to_string();
-        let headers = request.headers.inner.clone();
+        let mut headers = request.headers.inner.clone();
+        if let Some(AuthKind::Basic(header_val)) = &effective_auth {
+            headers.retain(|(k, _)| k != "authorization");
+            headers.push(("authorization".to_string(), header_val.clone()));
+        }
         let body = if request.content.is_empty() && request.py_stream.is_none() {
             None
         } else {

@@ -198,6 +198,41 @@ async def test_send_prefers_handle_async_request_over_handle_request():
 
 
 @pytest.mark.anyio
+async def test_send_auth_argument_basic(server):
+    async with httprs.AsyncClient() as client:
+        request = client.build_request("GET", server.url + "/echo_headers")
+        response = await client.send(request, auth=httprs.BasicAuth("user", "pass"))
+    assert response.status_code == 200
+    data = response.json()
+    assert data.get("authorization", "").startswith("Basic ")
+
+
+@pytest.mark.anyio
+async def test_send_auth_argument_overrides_existing_authorization_header(server):
+    async with httprs.AsyncClient() as client:
+        request = client.build_request(
+            "GET",
+            server.url + "/echo_headers",
+            headers={"authorization": "Basic stale-token"},
+        )
+        response = await client.send(request, auth=httprs.BasicAuth("user", "pass"))
+    assert response.status_code == 200
+    data = response.json()
+    assert data.get("authorization", "").startswith("Basic ")
+    assert data.get("authorization") != "Basic stale-token"
+
+
+@pytest.mark.anyio
+async def test_send_uses_client_default_auth(server):
+    async with httprs.AsyncClient(auth=httprs.BasicAuth("user", "pass")) as client:
+        request = client.build_request("GET", server.url + "/echo_headers")
+        response = await client.send(request)
+    assert response.status_code == 200
+    data = response.json()
+    assert data.get("authorization", "").startswith("Basic ")
+
+
+@pytest.mark.anyio
 async def test_subclass_super_init_kwargs(server):
     class WrappedAsyncClient(httprs.AsyncClient):
         def __init__(self, **kwargs):
