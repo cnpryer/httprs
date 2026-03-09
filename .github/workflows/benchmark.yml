@@ -28,10 +28,11 @@ jobs:
       - name: Install pip
         run: uv pip install pip --upgrade
 
-      - name: Build
+      - name: Build (release)
         uses: PyO3/maturin-action@v1
         with:
           command: develop
+          args: --release
 
       - name: Run benchmarks
         id: benchmark
