@@ -102,6 +102,38 @@ def test_send_uses_custom_transport():
     assert response.text == "from-transport"
 
 
+def test_send_auth_argument_basic(server):
+    with httprs.Client() as client:
+        request = client.build_request("GET", server.url + "/echo_headers")
+        response = client.send(request, auth=httprs.BasicAuth("user", "pass"))
+    assert response.status_code == 200
+    data = response.json()
+    assert data.get("authorization", "").startswith("Basic ")
+
+
+def test_send_auth_argument_overrides_existing_authorization_header(server):
+    with httprs.Client() as client:
+        request = client.build_request(
+            "GET",
+            server.url + "/echo_headers",
+            headers={"authorization": "Basic stale-token"},
+        )
+        response = client.send(request, auth=httprs.BasicAuth("user", "pass"))
+    assert response.status_code == 200
+    data = response.json()
+    assert data.get("authorization", "").startswith("Basic ")
+    assert data.get("authorization") != "Basic stale-token"
+
+
+def test_send_uses_client_default_auth(server):
+    with httprs.Client(auth=httprs.BasicAuth("user", "pass")) as client:
+        request = client.build_request("GET", server.url + "/echo_headers")
+        response = client.send(request)
+    assert response.status_code == 200
+    data = response.json()
+    assert data.get("authorization", "").startswith("Basic ")
+
+
 def test_custom_headers_per_request(server):
     with httprs.Client() as client:
         response = client.get(
