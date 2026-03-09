@@ -146,6 +146,7 @@ Only explicit path-based excludes are applied:
 - `respx` interception parity is out of scope in the normal ecosystem loop; treat those failures as excluded from day-to-day compatibility work.
 - `ASGITransport` and `WSGITransport` are not implemented in `httprs` and currently raise `NotImplementedError`.
 - Private `httpx` internals (`httpx._*`) are intentionally not mirrored; compatibility work targets public API/behavior only.
+- Private underscore attributes (for example `Client._mounts`) are out of scope and should not be implemented for compatibility.
 
 ### Development loop
 

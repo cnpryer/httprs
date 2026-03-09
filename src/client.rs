@@ -1,7 +1,7 @@
 use crate::auth::{PyBasicAuth, PyDigestAuth};
-use crate::config::PyTimeout;
+use crate::config::{PyLimits, PyTimeout};
 use crate::models::{version_str, PyHeaders, PyRequest, PyResponse, ResponseStream};
-use pyo3::exceptions::{PyRuntimeError, PyValueError};
+use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyByteArray, PyBytes, PyDict, PyList, PyTuple};
 use std::sync::{Arc, Mutex};
@@ -96,27 +96,162 @@ fn append_bytes_chunk(item: &Bound<'_, PyAny>, out: &mut Vec<u8>) -> PyResult<()
     Ok(())
 }
 
-fn collect_content_bytes(py: Python<'_>, content: Option<Py<PyAny>>) -> PyResult<Vec<u8>> {
-    let Some(content) = content else {
+fn extract_multipart_boundary(content_type: &str) -> Option<String> {
+    let mut parts = content_type.split(';').map(str::trim);
+    let media_type = parts.next()?.to_ascii_lowercase();
+    if media_type != "multipart/form-data" {
+        return None;
+    }
+    for part in parts {
+        if let Some(value) = part.strip_prefix("boundary=") {
+            return Some(value.trim_matches('"').to_string());
+        }
+    }
+    None
+}
+
+fn py_value_to_bytes(value: &Bound<'_, PyAny>) -> PyResult<Vec<u8>> {
+    let mut out = Vec::new();
+    append_bytes_chunk(value, &mut out)?;
+    Ok(out)
+}
+
+fn collect_multipart_fields(
+    py: Python<'_>,
+    data: Option<Py<PyAny>>,
+) -> PyResult<Vec<(String, Vec<u8>)>> {
+    let Some(data) = data else {
         return Ok(Vec::new());
     };
-    let bound = content.bind(py);
-    if let Ok(bytes) = bound.cast::<PyBytes>() {
-        return Ok(bytes.as_bytes().to_vec());
-    }
-    if let Ok(bytearray) = bound.cast::<PyByteArray>() {
-        return Ok(bytearray.to_vec());
-    }
-    if let Ok(text) = bound.extract::<String>() {
-        return Ok(text.into_bytes());
+    let bound = data.bind(py);
+    let mut fields = Vec::new();
+
+    if let Ok(dict) = bound.cast::<PyDict>() {
+        for (k, v) in dict.iter() {
+            let key: String = k.extract()?;
+            if let Ok(list) = v.cast::<PyList>() {
+                for item in list.iter() {
+                    fields.push((key.clone(), py_value_to_bytes(&item)?));
+                }
+            } else {
+                fields.push((key, py_value_to_bytes(&v)?));
+            }
+        }
+        return Ok(fields);
     }
 
-    let mut out = Vec::new();
     for item in bound.try_iter()? {
         let item = item?;
-        append_bytes_chunk(&item, &mut out)?;
+        let pair = item.cast::<PyTuple>()?;
+        if pair.len() != 2 {
+            return Err(PyTypeError::new_err(
+                "multipart form fields must be 2-tuples",
+            ));
+        }
+        let key: String = pair.get_item(0)?.extract()?;
+        let value = pair.get_item(1)?;
+        fields.push((key, py_value_to_bytes(&value)?));
+    }
+    Ok(fields)
+}
+
+fn collect_multipart_files(
+    py: Python<'_>,
+    files: Option<Py<PyAny>>,
+) -> PyResult<Vec<(String, String, String, Vec<u8>)>> {
+    let Some(files) = files else {
+        return Ok(Vec::new());
+    };
+    let bound = files.bind(py);
+    let mut out = Vec::new();
+
+    let mut append_file = |name: String, file_obj: Bound<'_, PyAny>| -> PyResult<()> {
+        let file_obj = file_obj.into_any();
+
+        if let Ok(file_tuple) = file_obj.cast::<PyTuple>() {
+            if file_tuple.len() < 2 {
+                return Err(PyTypeError::new_err(
+                    "file tuples must include at least (filename, content)",
+                ));
+            }
+            let filename: String = file_tuple.get_item(0)?.extract()?;
+            let content = py_value_to_bytes(&file_tuple.get_item(1)?)?;
+            let content_type = if file_tuple.len() >= 3 {
+                file_tuple
+                    .get_item(2)?
+                    .extract::<String>()
+                    .unwrap_or_else(|_| "application/octet-stream".to_string())
+            } else {
+                "application/octet-stream".to_string()
+            };
+            out.push((name, filename, content_type, content));
+        } else {
+            let content = py_value_to_bytes(&file_obj)?;
+            out.push((
+                name,
+                "upload".to_string(),
+                "application/octet-stream".to_string(),
+                content,
+            ));
+        }
+        Ok(())
+    };
+
+    if let Ok(dict) = bound.cast::<PyDict>() {
+        for (k, v) in dict.iter() {
+            let name: String = k.extract()?;
+            append_file(name, v)?;
+        }
+        return Ok(out);
+    }
+
+    for entry in bound.try_iter()? {
+        let entry = entry?;
+        let tuple = entry.cast::<PyTuple>()?;
+        if tuple.len() != 2 {
+            return Err(PyTypeError::new_err(
+                "files must be a sequence of (name, file) pairs",
+            ));
+        }
+        let name: String = tuple.get_item(0)?.extract()?;
+        let file_obj = tuple.get_item(1)?;
+        append_file(name, file_obj)?;
     }
     Ok(out)
+}
+
+fn build_multipart_body(
+    py: Python<'_>,
+    data: Option<Py<PyAny>>,
+    files: Option<Py<PyAny>>,
+    boundary: &str,
+) -> PyResult<Vec<u8>> {
+    let fields = collect_multipart_fields(py, data)?;
+    let file_parts = collect_multipart_files(py, files)?;
+    let mut body = Vec::new();
+
+    for (name, value) in fields {
+        body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+        body.extend_from_slice(
+            format!("Content-Disposition: form-data; name=\"{name}\"\r\n\r\n").as_bytes(),
+        );
+        body.extend_from_slice(&value);
+        body.extend_from_slice(b"\r\n");
+    }
+
+    for (name, filename, content_type, content) in file_parts {
+        body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+        body.extend_from_slice(
+            format!("Content-Disposition: form-data; name=\"{name}\"; filename=\"{filename}\"\r\n")
+                .as_bytes(),
+        );
+        body.extend_from_slice(format!("Content-Type: {content_type}\r\n\r\n").as_bytes());
+        body.extend_from_slice(&content);
+        body.extend_from_slice(b"\r\n");
+    }
+
+    body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
+    Ok(body)
 }
 
 fn timeout_config_from_arg(
@@ -281,6 +416,74 @@ fn parse_timeout_arg(
     }
 }
 
+fn default_limits() -> PyLimits {
+    PyLimits::new(Some(100), Some(20), Some(5.0))
+}
+
+fn parse_limits_arg(py: Python<'_>, limits: Option<Py<PyAny>>) -> PyResult<PyLimits> {
+    let Some(limits) = limits else {
+        return Ok(default_limits());
+    };
+    let bound = limits.bind(py);
+    if bound.is_none() {
+        return Ok(default_limits());
+    }
+    if let Ok(parsed) = bound.extract::<PyRef<PyLimits>>() {
+        return Ok(parsed.clone());
+    }
+
+    let max_connections = bound
+        .getattr("max_connections")
+        .ok()
+        .and_then(|v| v.extract().ok());
+    let max_keepalive_connections = bound
+        .getattr("max_keepalive_connections")
+        .ok()
+        .and_then(|v| v.extract().ok());
+    let keepalive_expiry = bound
+        .getattr("keepalive_expiry")
+        .ok()
+        .and_then(|v| v.extract().ok());
+    Ok(PyLimits::new(
+        max_connections,
+        max_keepalive_connections,
+        keepalive_expiry,
+    ))
+}
+
+fn parse_proxy_arg(py: Python<'_>, proxy: Option<Py<PyAny>>) -> PyResult<Option<String>> {
+    let Some(proxy) = proxy else {
+        return Ok(None);
+    };
+    let bound = proxy.bind(py);
+    if bound.is_none() {
+        return Ok(None);
+    }
+    if let Ok(url) = bound.extract::<String>() {
+        return Ok(if url.is_empty() { None } else { Some(url) });
+    }
+    if let Ok(proxy_ref) = bound.extract::<PyRef<crate::proxy::PyProxy>>() {
+        let url = proxy_ref.url().to_string();
+        return Ok(if url.is_empty() { None } else { Some(url) });
+    }
+    if let Ok(url_attr) = bound.getattr("url") {
+        let url: String = url_attr.extract()?;
+        return Ok(if url.is_empty() { None } else { Some(url) });
+    }
+    Err(PyTypeError::new_err("proxy must be a str, Proxy, or None"))
+}
+
+fn parse_verify_arg(py: Python<'_>, verify: Option<Py<PyAny>>) -> bool {
+    let Some(verify) = verify else {
+        return true;
+    };
+    let bound = verify.bind(py);
+    if bound.is_none() {
+        return true;
+    }
+    bound.extract::<bool>().unwrap_or(true)
+}
+
 /// Returns true if `url` resolves to a private, loopback, or link-local address.
 /// Used to block SSRF via open redirects.
 fn is_private_url(url: &url::Url) -> bool {
@@ -306,23 +509,111 @@ fn is_private_url(url: &url::Url) -> bool {
 /// Build a redirect policy. When `block_private` is true, any redirect that
 /// resolves to a private/loopback address is rejected with an error, preventing
 /// SSRF attacks through server-controlled redirects.
-fn make_redirect_policy(follow: bool, block_private: bool) -> reqwest::redirect::Policy {
+fn make_redirect_policy(
+    follow: bool,
+    block_private: bool,
+    max_redirects: usize,
+) -> reqwest::redirect::Policy {
     if !follow {
         return reqwest::redirect::Policy::none();
     }
     if block_private {
-        reqwest::redirect::Policy::custom(|attempt| {
+        reqwest::redirect::Policy::custom(move |attempt| {
             if is_private_url(attempt.url()) {
                 attempt.error("redirect to private/loopback address blocked (SSRF protection)")
-            } else if attempt.previous().len() >= 20 {
+            } else if attempt.previous().len() >= max_redirects {
                 attempt.stop()
             } else {
                 attempt.follow()
             }
         })
     } else {
-        reqwest::redirect::Policy::limited(20)
+        reqwest::redirect::Policy::limited(max_redirects)
     }
+}
+
+fn build_blocking_client(
+    py_timeout: &PyTimeout,
+    follow_redirects: bool,
+    block_private_redirects: bool,
+    max_redirects: usize,
+    trust_env: bool,
+    verify: bool,
+    proxy: Option<&str>,
+    limits: &PyLimits,
+) -> PyResult<reqwest::blocking::Client> {
+    let redirect_policy =
+        make_redirect_policy(follow_redirects, block_private_redirects, max_redirects);
+    let mut client_builder = reqwest::blocking::Client::builder()
+        .redirect(redirect_policy)
+        .cookie_store(true);
+
+    if !trust_env {
+        client_builder = client_builder.no_proxy();
+    }
+    if !verify {
+        client_builder = client_builder.danger_accept_invalid_certs(true);
+    }
+    if let Some(proxy_url) = proxy {
+        let reqwest_proxy =
+            reqwest::Proxy::all(proxy_url).map_err(|e| PyValueError::new_err(e.to_string()))?;
+        client_builder = client_builder.proxy(reqwest_proxy);
+    }
+    if let Some(ct) = py_timeout.connect {
+        client_builder = client_builder.connect_timeout(Duration::from_secs_f64(ct));
+    }
+    if let Some(idle) = limits.keepalive_expiry {
+        client_builder = client_builder.pool_idle_timeout(Duration::from_secs_f64(idle));
+    }
+    if let Some(max_idle) = limits.max_keepalive_connections {
+        client_builder = client_builder.pool_max_idle_per_host(max_idle);
+    }
+
+    client_builder
+        .build()
+        .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+}
+
+fn build_async_client(
+    py_timeout: &PyTimeout,
+    follow_redirects: bool,
+    block_private_redirects: bool,
+    max_redirects: usize,
+    trust_env: bool,
+    verify: bool,
+    proxy: Option<&str>,
+    limits: &PyLimits,
+) -> PyResult<reqwest::Client> {
+    let redirect_policy =
+        make_redirect_policy(follow_redirects, block_private_redirects, max_redirects);
+    let mut client_builder = reqwest::Client::builder()
+        .redirect(redirect_policy)
+        .cookie_store(true);
+
+    if !trust_env {
+        client_builder = client_builder.no_proxy();
+    }
+    if !verify {
+        client_builder = client_builder.danger_accept_invalid_certs(true);
+    }
+    if let Some(proxy_url) = proxy {
+        let reqwest_proxy =
+            reqwest::Proxy::all(proxy_url).map_err(|e| PyValueError::new_err(e.to_string()))?;
+        client_builder = client_builder.proxy(reqwest_proxy);
+    }
+    if let Some(ct) = py_timeout.connect {
+        client_builder = client_builder.connect_timeout(Duration::from_secs_f64(ct));
+    }
+    if let Some(idle) = limits.keepalive_expiry {
+        client_builder = client_builder.pool_idle_timeout(Duration::from_secs_f64(idle));
+    }
+    if let Some(max_idle) = limits.max_keepalive_connections {
+        client_builder = client_builder.pool_max_idle_per_host(max_idle);
+    }
+
+    client_builder
+        .build()
+        .map_err(|e| PyRuntimeError::new_err(e.to_string()))
 }
 
 #[pyclass(name = "Client", subclass)]
@@ -331,10 +622,15 @@ pub struct PyClient {
     base_url: Option<String>,
     default_headers: PyHeaders,
     timeout: PyTimeout,
-    #[allow(dead_code)]
     follow_redirects: bool,
-    #[allow(dead_code)]
     block_private_redirects: bool,
+    max_redirects: usize,
+    trust_env: bool,
+    verify: bool,
+    proxy: Option<String>,
+    limits: PyLimits,
+    http1: bool,
+    http2: bool,
     default_auth: Option<AuthKind>,
     transport: Option<Py<PyAny>>,
 }
@@ -365,28 +661,57 @@ impl PyClient {
 impl PyClient {
     #[new]
     #[pyo3(signature = (
-        base_url = None,
-        headers = None,
-        timeout = None,
-        auth = None,
-        transport = None,
-        follow_redirects = true,
         *,
+        auth = None,
+        params = None,
+        headers = None,
+        cookies = None,
+        verify = None,
+        cert = None,
+        trust_env = true,
+        http1 = true,
         http2 = false,
+        proxy = None,
+        mounts = None,
+        timeout = None,
+        follow_redirects = false,
+        limits = None,
+        max_redirects = 20,
+        event_hooks = None,
+        base_url = None,
+        transport = None,
+        default_encoding = None,
         block_private_redirects = false,
     ))]
     pub fn new(
         py: Python<'_>,
-        base_url: Option<String>,
-        headers: Option<Py<PyAny>>,
-        timeout: Option<Py<PyAny>>,
         auth: Option<Py<PyAny>>,
-        transport: Option<Py<PyAny>>,
-        follow_redirects: bool,
+        params: Option<Py<PyAny>>,
+        headers: Option<Py<PyAny>>,
+        cookies: Option<Py<PyAny>>,
+        verify: Option<Py<PyAny>>,
+        cert: Option<Py<PyAny>>,
+        trust_env: bool,
+        http1: bool,
         http2: bool,
+        proxy: Option<Py<PyAny>>,
+        mounts: Option<Py<PyAny>>,
+        timeout: Option<Py<PyAny>>,
+        follow_redirects: bool,
+        limits: Option<Py<PyAny>>,
+        max_redirects: usize,
+        event_hooks: Option<Py<PyAny>>,
+        base_url: Option<String>,
+        transport: Option<Py<PyAny>>,
+        default_encoding: Option<Py<PyAny>>,
         block_private_redirects: bool,
     ) -> PyResult<Self> {
-        let _ = http2;
+        let _ = params;
+        let _ = cookies;
+        let _ = cert;
+        let _ = mounts;
+        let _ = event_hooks;
+        let _ = default_encoding;
         let default_headers = match headers {
             None => PyHeaders::new_empty(),
             Some(h) => PyHeaders::from_pyobject(py, h)?,
@@ -411,19 +736,19 @@ impl PyClient {
             Some(a) => Some(extract_auth(py, &a)?),
         };
 
-        let redirect_policy = make_redirect_policy(follow_redirects, block_private_redirects);
-
-        let mut client_builder = reqwest::blocking::Client::builder()
-            .redirect(redirect_policy)
-            .cookie_store(true);
-
-        if let Some(ct) = py_timeout.connect {
-            client_builder = client_builder.connect_timeout(Duration::from_secs_f64(ct));
-        }
-
-        let inner = client_builder
-            .build()
-            .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+        let verify = parse_verify_arg(py, verify);
+        let proxy = parse_proxy_arg(py, proxy)?;
+        let limits = parse_limits_arg(py, limits)?;
+        let inner = build_blocking_client(
+            &py_timeout,
+            follow_redirects,
+            block_private_redirects,
+            max_redirects,
+            trust_env,
+            verify,
+            proxy.as_deref(),
+            &limits,
+        )?;
 
         Ok(PyClient {
             inner: Some(inner),
@@ -432,6 +757,13 @@ impl PyClient {
             timeout: py_timeout,
             follow_redirects,
             block_private_redirects,
+            max_redirects,
+            trust_env,
+            verify,
+            proxy,
+            limits,
+            http1,
+            http2,
             default_auth,
             transport,
         })
@@ -447,12 +779,27 @@ impl PyClient {
     //         kwargs.setdefault("follow_redirects", True)
     //         super().__init__(**kwargs)
     // ```
-    #[pyo3(signature = (*_args, **_kwargs))]
+    #[pyo3(signature = (*_args, **kwargs))]
     fn __init__(
-        _slf: &Bound<'_, Self>,
+        slf: &Bound<'_, Self>,
+        _py: Python<'_>,
         _args: &Bound<'_, PyTuple>,
-        _kwargs: Option<&Bound<'_, PyDict>>,
+        kwargs: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
+        if let Some(kwargs) = kwargs {
+            if let Some(timeout_obj) = kwargs.get_item("timeout")? {
+                let timeout = if timeout_obj.is_none() {
+                    crate::config::PyTimeout::new(None, None, None, None, None)
+                } else if let Ok(pt) = timeout_obj.extract::<PyRef<crate::config::PyTimeout>>() {
+                    pt.clone()
+                } else if let Ok(f) = timeout_obj.extract::<f64>() {
+                    crate::config::PyTimeout::new(Some(f), None, None, None, None)
+                } else {
+                    crate::config::PyTimeout::new(Some(5.0), None, None, None, None)
+                };
+                slf.borrow_mut().timeout = timeout;
+            }
+        }
         Ok(())
     }
 
@@ -481,8 +828,21 @@ impl PyClient {
         timeout: Option<Py<PyAny>>,
         follow_redirects: Option<bool>,
     ) -> PyResult<PyResponse> {
-        let _ = follow_redirects;
-        let client = self.get_client()?.clone();
+        let follow = follow_redirects.unwrap_or(self.follow_redirects);
+        let client = if follow == self.follow_redirects {
+            self.get_client()?.clone()
+        } else {
+            build_blocking_client(
+                &self.timeout,
+                follow,
+                self.block_private_redirects,
+                self.max_redirects,
+                self.trust_env,
+                self.verify,
+                self.proxy.as_deref(),
+                &self.limits,
+            )?
+        };
         let full_url = self.resolve_url(url);
 
         let extra_headers = match headers {
@@ -866,7 +1226,6 @@ impl PyClient {
         timeout: Option<Py<PyAny>>,
         extensions: Option<Py<PyAny>>,
     ) -> PyResult<PyRequest> {
-        let _ = files;
         let url_value = {
             let bound = url.bind(py);
             if let Ok(url_str) = bound.extract::<String>() {
@@ -895,9 +1254,28 @@ impl PyClient {
         }
 
         let has_content = content.is_some();
-        let mut body_content = collect_content_bytes(py, content)?;
+        let mut request_content = content;
+        let mut body_content = Vec::new();
+        let multipart_boundary = merged_headers
+            .get("content-type", None)
+            .and_then(|ct| extract_multipart_boundary(&ct));
         if !has_content {
-            if let Some(json_obj) = json {
+            if files.is_some() || multipart_boundary.is_some() {
+                let boundary = if let Some(boundary) = multipart_boundary {
+                    boundary
+                } else {
+                    let boundary = "httprs-boundary".to_string();
+                    if merged_headers.get("content-type", None).is_none() {
+                        merged_headers.inner.push((
+                            "content-type".to_string(),
+                            format!("multipart/form-data; boundary={boundary}"),
+                        ));
+                    }
+                    boundary
+                };
+                let multipart_data = data.or(json);
+                body_content = build_multipart_body(py, multipart_data, files, &boundary)?;
+            } else if let Some(json_obj) = json {
                 let json_mod = py.import("json")?;
                 let json_str: String = json_mod
                     .call_method1("dumps", (json_obj.bind(py),))?
@@ -925,6 +1303,7 @@ impl PyClient {
                     }
                 };
             }
+            request_content = Some(PyBytes::new(py, &body_content).into_any().unbind());
         }
 
         let timeout_cfg = timeout_config_from_arg(py, timeout, &self.timeout);
@@ -950,7 +1329,7 @@ impl PyClient {
             method,
             full_url.into_pyobject(py)?.into_any().unbind(),
             Some(headers_obj.into_bound(py).into_any().unbind()),
-            Some(PyBytes::new(py, &body_content).into_any().unbind()),
+            request_content,
             Some(ext_dict.into_any().unbind()),
         )
     }
@@ -972,7 +1351,6 @@ impl PyClient {
         follow_redirects: Option<bool>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let _ = auth;
-        let _ = follow_redirects;
 
         let request_obj = Py::new(py, request.clone())?;
         let transport_obj: Option<Py<PyAny>> = {
@@ -982,20 +1360,40 @@ impl PyClient {
         if let Some(transport) = transport_obj {
             let transport_bound = transport.into_bound(py).into_any();
             if transport_bound.hasattr("handle_request")? {
-                return transport_bound
-                    .call_method1("handle_request", (request_obj.clone_ref(py),));
+                let response =
+                    transport_bound.call_method1("handle_request", (request_obj.clone_ref(py),))?;
+                if let Ok(mut py_response) = response.extract::<PyRefMut<'_, PyResponse>>() {
+                    if py_response.request.is_none() {
+                        py_response.request = Some(request_obj.clone_ref(py));
+                    }
+                }
+                return Ok(response);
             }
         }
 
         let this = slf.borrow();
-        let client = this.get_client()?.clone();
+        let follow = follow_redirects.unwrap_or(this.follow_redirects);
+        let client = if follow == this.follow_redirects {
+            this.get_client()?.clone()
+        } else {
+            build_blocking_client(
+                &this.timeout,
+                follow,
+                this.block_private_redirects,
+                this.max_redirects,
+                this.trust_env,
+                this.verify,
+                this.proxy.as_deref(),
+                &this.limits,
+            )?
+        };
         let method_str = request.method.clone();
         let url = request.url.inner.to_string();
         let headers: Vec<(String, String)> = request.headers.inner.clone();
-        let body = if request.content.is_empty() {
+        let body = if request.content.is_empty() && request.py_stream.is_none() {
             None
         } else {
-            Some(request.content.clone())
+            Some(request.read(py)?)
         };
 
         let method = reqwest::Method::from_bytes(method_str.as_bytes())
@@ -1074,6 +1472,26 @@ impl PyClient {
     #[getter]
     pub fn timeout(&self) -> PyTimeout {
         self.timeout.clone()
+    }
+
+    #[getter]
+    pub fn proxy(&self) -> Option<String> {
+        self.proxy.clone()
+    }
+
+    #[getter]
+    pub fn limits(&self) -> PyLimits {
+        self.limits.clone()
+    }
+
+    #[getter]
+    pub fn http1(&self) -> bool {
+        self.http1
+    }
+
+    #[getter]
+    pub fn http2(&self) -> bool {
+        self.http2
     }
 
     fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
@@ -1162,11 +1580,16 @@ pub struct PyAsyncClient {
     base_url: Option<String>,
     default_headers: PyHeaders,
     timeout: PyTimeout,
-    #[allow(dead_code)]
     follow_redirects: bool,
-    #[allow(dead_code)]
     block_private_redirects: bool,
-    #[allow(dead_code)]
+    max_redirects: usize,
+    trust_env: bool,
+    verify: bool,
+    proxy: Option<String>,
+    limits: PyLimits,
+    http1: bool,
+    http2: bool,
+    default_auth: Option<AuthKind>,
     transport: Option<Py<PyAny>>,
 }
 
@@ -1243,26 +1666,57 @@ async fn convert_async_response(
 impl PyAsyncClient {
     #[new]
     #[pyo3(signature = (
-        base_url = None,
-        headers = None,
-        timeout = None,
-        transport = None,
-        follow_redirects = true,
         *,
+        auth = None,
+        params = None,
+        headers = None,
+        cookies = None,
+        verify = None,
+        cert = None,
+        trust_env = true,
+        http1 = true,
         http2 = false,
+        proxy = None,
+        mounts = None,
+        timeout = None,
+        follow_redirects = false,
+        limits = None,
+        max_redirects = 20,
+        event_hooks = None,
+        base_url = None,
+        transport = None,
+        default_encoding = None,
         block_private_redirects = false,
     ))]
     pub fn new(
         py: Python<'_>,
-        base_url: Option<String>,
+        auth: Option<Py<PyAny>>,
+        params: Option<Py<PyAny>>,
         headers: Option<Py<PyAny>>,
-        timeout: Option<Py<PyAny>>,
-        transport: Option<Py<PyAny>>,
-        follow_redirects: bool,
+        cookies: Option<Py<PyAny>>,
+        verify: Option<Py<PyAny>>,
+        cert: Option<Py<PyAny>>,
+        trust_env: bool,
+        http1: bool,
         http2: bool,
+        proxy: Option<Py<PyAny>>,
+        mounts: Option<Py<PyAny>>,
+        timeout: Option<Py<PyAny>>,
+        follow_redirects: bool,
+        limits: Option<Py<PyAny>>,
+        max_redirects: usize,
+        event_hooks: Option<Py<PyAny>>,
+        base_url: Option<String>,
+        transport: Option<Py<PyAny>>,
+        default_encoding: Option<Py<PyAny>>,
         block_private_redirects: bool,
     ) -> PyResult<Self> {
-        let _ = http2;
+        let _ = params;
+        let _ = cookies;
+        let _ = cert;
+        let _ = mounts;
+        let _ = event_hooks;
+        let _ = default_encoding;
         let default_headers = match headers {
             None => PyHeaders::new_empty(),
             Some(h) => PyHeaders::from_pyobject(py, h)?,
@@ -1282,19 +1736,23 @@ impl PyAsyncClient {
             }
         };
 
-        let redirect_policy = make_redirect_policy(follow_redirects, block_private_redirects);
-
-        let mut client_builder = reqwest::Client::builder()
-            .redirect(redirect_policy)
-            .cookie_store(true);
-
-        if let Some(ct) = py_timeout.connect {
-            client_builder = client_builder.connect_timeout(Duration::from_secs_f64(ct));
-        }
-
-        let inner = client_builder
-            .build()
-            .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+        let verify = parse_verify_arg(py, verify);
+        let proxy = parse_proxy_arg(py, proxy)?;
+        let limits = parse_limits_arg(py, limits)?;
+        let default_auth = match auth {
+            None => None,
+            Some(a) => Some(extract_auth(py, &a)?),
+        };
+        let inner = build_async_client(
+            &py_timeout,
+            follow_redirects,
+            block_private_redirects,
+            max_redirects,
+            trust_env,
+            verify,
+            proxy.as_deref(),
+            &limits,
+        )?;
 
         Ok(PyAsyncClient {
             inner: Some(inner),
@@ -1303,6 +1761,14 @@ impl PyAsyncClient {
             timeout: py_timeout,
             follow_redirects,
             block_private_redirects,
+            max_redirects,
+            trust_env,
+            verify,
+            proxy,
+            limits,
+            http1,
+            http2,
+            default_auth,
             transport,
         })
     }
@@ -1317,12 +1783,27 @@ impl PyAsyncClient {
     //         kwargs.setdefault("follow_redirects", True)
     //         super().__init__(**kwargs)
     // ```
-    #[pyo3(signature = (*_args, **_kwargs))]
+    #[pyo3(signature = (*_args, **kwargs))]
     fn __init__(
-        _slf: &Bound<'_, Self>,
+        slf: &Bound<'_, Self>,
+        _py: Python<'_>,
         _args: &Bound<'_, PyTuple>,
-        _kwargs: Option<&Bound<'_, PyDict>>,
+        kwargs: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
+        if let Some(kwargs) = kwargs {
+            if let Some(timeout_obj) = kwargs.get_item("timeout")? {
+                let timeout = if timeout_obj.is_none() {
+                    crate::config::PyTimeout::new(None, None, None, None, None)
+                } else if let Ok(pt) = timeout_obj.extract::<PyRef<PyTimeout>>() {
+                    pt.clone()
+                } else if let Ok(f) = timeout_obj.extract::<f64>() {
+                    crate::config::PyTimeout::new(Some(f), None, None, None, None)
+                } else {
+                    crate::config::PyTimeout::new(Some(5.0), None, None, None, None)
+                };
+                slf.borrow_mut().timeout = timeout;
+            }
+        }
         Ok(())
     }
 
@@ -1353,18 +1834,14 @@ impl PyAsyncClient {
             }
         }
 
-        let auth_header: Option<String> = match auth {
-            Some(ref a) => {
-                if let Ok(basic) = a.bind(py).extract::<PyRef<PyBasicAuth>>() {
-                    Some(basic.authorization_header().to_string())
-                } else if let Ok((user, pass)) = a.bind(py).extract::<(String, String)>() {
-                    let ba = PyBasicAuth::new(&user, &pass);
-                    Some(ba.authorization_header().to_string())
-                } else {
-                    None
-                }
-            }
+        let req_auth = match auth {
+            Some(ref a) => Some(extract_auth(py, a)?),
             None => None,
+        };
+        let effective_auth = req_auth.as_ref().or(self.default_auth.as_ref());
+        let auth_header: Option<String> = match effective_auth {
+            Some(AuthKind::Basic(header)) => Some(header.clone()),
+            _ => None,
         };
 
         let body_bytes: Option<Vec<u8>> = if let Some(bytes) = content {
@@ -1647,7 +2124,6 @@ impl PyAsyncClient {
         timeout: Option<Py<PyAny>>,
         extensions: Option<Py<PyAny>>,
     ) -> PyResult<PyRequest> {
-        let _ = files;
         let url_value = {
             let bound = url.bind(py);
             if let Ok(url_str) = bound.extract::<String>() {
@@ -1675,9 +2151,28 @@ impl PyAsyncClient {
         }
 
         let has_content = content.is_some();
-        let mut body_content = collect_content_bytes(py, content)?;
+        let mut request_content = content;
+        let mut body_content = Vec::new();
+        let multipart_boundary = merged_headers
+            .get("content-type", None)
+            .and_then(|ct| extract_multipart_boundary(&ct));
         if !has_content {
-            if let Some(json_obj) = json {
+            if files.is_some() || multipart_boundary.is_some() {
+                let boundary = if let Some(boundary) = multipart_boundary {
+                    boundary
+                } else {
+                    let boundary = "httprs-boundary".to_string();
+                    if merged_headers.get("content-type", None).is_none() {
+                        merged_headers.inner.push((
+                            "content-type".to_string(),
+                            format!("multipart/form-data; boundary={boundary}"),
+                        ));
+                    }
+                    boundary
+                };
+                let multipart_data = data.or(json);
+                body_content = build_multipart_body(py, multipart_data, files, &boundary)?;
+            } else if let Some(json_obj) = json {
                 let json_mod = py.import("json")?;
                 let json_str: String = json_mod
                     .call_method1("dumps", (json_obj.bind(py),))?
@@ -1705,6 +2200,7 @@ impl PyAsyncClient {
                     }
                 };
             }
+            request_content = Some(PyBytes::new(py, &body_content).into_any().unbind());
         }
 
         let timeout_cfg = timeout_config_from_arg(py, timeout, &self.timeout);
@@ -1730,7 +2226,7 @@ impl PyAsyncClient {
             method,
             full_url.into_pyobject(py)?.into_any().unbind(),
             Some(headers_obj.into_bound(py).into_any().unbind()),
-            Some(PyBytes::new(py, &body_content).into_any().unbind()),
+            request_content,
             Some(ext_dict.into_any().unbind()),
         )
     }
@@ -1751,7 +2247,6 @@ impl PyAsyncClient {
         follow_redirects: Option<bool>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let _ = auth;
-        let _ = follow_redirects;
         let request_obj = Py::new(py, request.clone())?;
 
         let transport_obj: Option<Py<PyAny>> = {
@@ -1765,21 +2260,40 @@ impl PyAsyncClient {
                     .call_method1("handle_async_request", (request_obj.clone_ref(py),));
             }
             if transport_bound.hasattr("handle_request")? {
-                let resp =
+                let response =
                     transport_bound.call_method1("handle_request", (request_obj.clone_ref(py),))?;
-                return immediate_awaitable(py, resp.unbind());
+                if let Ok(mut py_response) = response.extract::<PyRefMut<'_, PyResponse>>() {
+                    if py_response.request.is_none() {
+                        py_response.request = Some(request_obj.clone_ref(py));
+                    }
+                }
+                return immediate_awaitable(py, response.unbind());
             }
         }
 
         let this = slf.borrow();
-        let client = this.get_client()?;
+        let follow = follow_redirects.unwrap_or(this.follow_redirects);
+        let client = if follow == this.follow_redirects {
+            this.get_client()?
+        } else {
+            build_async_client(
+                &this.timeout,
+                follow,
+                this.block_private_redirects,
+                this.max_redirects,
+                this.trust_env,
+                this.verify,
+                this.proxy.as_deref(),
+                &this.limits,
+            )?
+        };
         let method_str = request.method.clone();
         let url = request.url.inner.to_string();
         let headers = request.headers.inner.clone();
-        let body = if request.content.is_empty() {
+        let body = if request.content.is_empty() && request.py_stream.is_none() {
             None
         } else {
-            Some(request.content.clone())
+            Some(request.read(py)?)
         };
         let request_obj_stream = request_obj.clone_ref(py);
         let request_obj_regular = request_obj.clone_ref(py);
@@ -1826,6 +2340,26 @@ impl PyAsyncClient {
     #[getter]
     pub fn timeout(&self) -> PyTimeout {
         self.timeout.clone()
+    }
+
+    #[getter]
+    pub fn proxy(&self) -> Option<String> {
+        self.proxy.clone()
+    }
+
+    #[getter]
+    pub fn limits(&self) -> PyLimits {
+        self.limits.clone()
+    }
+
+    #[getter]
+    pub fn http1(&self) -> bool {
+        self.http1
+    }
+
+    #[getter]
+    pub fn http2(&self) -> bool {
+        self.http2
     }
 
     fn __aenter__<'py>(slf: Py<Self>, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
