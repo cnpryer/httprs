@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - 
 
+## [0.0.1a6] - 2026-03-09
+
+- Use basic json_dumps (#20)
+- Extract basic auth for client requests (#19)
+
 ## [0.0.1a5] - 2026-03-09
 
 - Improve ecosystem compatibility (#16)
