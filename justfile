@@ -20,6 +20,7 @@ test: dbuild
 bump version:
     @uv run --no-sync bump.py --version {{version}}
     @uv lock
+    @cargo check
 
 bench: rbuild
     @uv run --no-sync --with httpx --with requests benchmark.py --packages httpx requests -n 5000
