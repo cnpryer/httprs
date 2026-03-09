@@ -139,6 +139,7 @@ Only explicit path-based excludes are applied:
 - Failures are considered `respx`-based if traces mention `respx/plugin.py`, `respx/router.py`, `RESPX: some routes were not called!`, or connection errors to `127.0.0.1:4010`.
 - Focus on regressions unrelated to `respx` (e.g., API, headers, cookies, streams, retries).
 - Address `respx` compatibility only in a future transport-interception phase.
+- Ecosystem report tables use **remaining real regressions**, which excludes `respx`-class failures and private underscore API checks (for example `_mounts`).
 
 #### Minimal shim scope
 

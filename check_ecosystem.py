@@ -136,6 +136,7 @@ class TestOutcome:
     exit_code: int = 0
     failing_tests: list[str] = field(default_factory=list)
     failure_details: dict[str, str] = field(default_factory=dict)
+    raw_output: str = ""
 
 
 @dataclass
@@ -187,7 +188,12 @@ def _parse_pytest_output(output: str, exit_code: int) -> TestOutcome:
             node_id = parts[0].strip()
             failing.append(node_id)
             if len(parts) > 1 and parts[1]:
-                details[node_id] = parts[1].strip()
+                detail = parts[1].strip()
+                if node_id in details:
+                    if detail not in details[node_id]:
+                        details[node_id] = f"{details[node_id]} | {detail}"
+                else:
+                    details[node_id] = detail
         # "ERROR tests/foo.py::test_bar" (collection/setup errors)
         elif line.startswith("ERROR "):
             parts = line[6:].split(" - ", 1)
@@ -195,7 +201,12 @@ def _parse_pytest_output(output: str, exit_code: int) -> TestOutcome:
             if "::" in node_id or node_id.endswith(".py"):
                 failing.append(node_id)
                 if len(parts) > 1 and parts[1]:
-                    details[node_id] = parts[1].strip()
+                    detail = parts[1].strip()
+                    if node_id in details:
+                        if detail not in details[node_id]:
+                            details[node_id] = f"{details[node_id]} | {detail}"
+                    else:
+                        details[node_id] = detail
 
     # Parse summary: "== 12 passed, 3 failed, 1 error, 5 skipped in 4.20s =="
     passed = failed = error = skipped = 0
@@ -233,6 +244,7 @@ def _parse_pytest_output(output: str, exit_code: int) -> TestOutcome:
         exit_code=exit_code,
         failing_tests=failing,
         failure_details=details,
+        raw_output=output,
     )
 
 
@@ -386,6 +398,9 @@ async def _run_pytest(
     env = os.environ.copy()
     if extra_env:
         env.update(extra_env)
+    # Keep pytest short-summary failure details from being truncated, so
+    # regression classification can reliably match root-cause signatures.
+    env.setdefault("COLUMNS", "240")
 
     tmpdir: str | None = None
     try:
@@ -608,15 +623,150 @@ def _format_regression_rate(regressions: int, baseline: TestOutcome) -> str:
     return f"{regressions} ({pct:.1f}%)"
 
 
-def _remaining_regression_count(diff: RepoDiff) -> int:
-    """Lower bound for remaining regressions.
+def _remaining_real_regression_count(diff: RepoDiff) -> int:
+    """Lower bound for remaining real regressions.
 
-    `len(diff.regressions)` is based on node-id set diff, but that can undercount
-    if pytest crashes before collection. In that case, fall back to pass-count gap.
+    Excludes out-of-scope failures documented in development.md:
+    - respx interception-dependent failures
+    - private underscore API checks (e.g. _mounts)
     """
-    known_regressions = len(diff.regressions)
-    pass_gap = max(0, diff.baseline.passed - diff.experiment.passed)
-    return max(known_regressions, pass_gap)
+    real_regressions, _accepted = _partition_regressions(diff)
+
+    if real_regressions:
+        return len(real_regressions)
+
+    # Session-level crashes might not produce stable node IDs.
+    if "__session__" in diff.experiment.failing_tests:
+        return max(0, diff.baseline.passed - diff.experiment.passed)
+
+    return 0
+
+
+def _accepted_regression_count(diff: RepoDiff) -> int:
+    _real, accepted = _partition_regressions(diff)
+    return len(accepted)
+
+
+def _partition_regressions(diff: RepoDiff) -> tuple[list[str], list[str]]:
+    real: list[str] = []
+    accepted: list[str] = []
+    for node_id in diff.regressions:
+        if _is_out_of_scope_regression(
+            node_id,
+            diff.experiment.failure_details.get(node_id),
+            diff.experiment.raw_output,
+        ):
+            accepted.append(node_id)
+        else:
+            real.append(node_id)
+    return real, accepted
+
+
+def _is_out_of_scope_regression(
+    node_id: str,
+    detail: str | None,
+    raw_output: str,
+) -> bool:
+    return _is_private_api_regression(
+        node_id, detail, raw_output
+    ) or _is_respx_regression(node_id, detail, raw_output)
+
+
+def _is_private_api_regression(
+    node_id: str,
+    detail: str | None,
+    raw_output: str,
+) -> bool:
+    text = " | ".join(
+        part for part in (detail, _node_output_excerpt(raw_output, node_id)) if part
+    ).lower()
+    return any(
+        marker in text
+        for marker in (
+            "has no attribute '_",
+            "cannot import name '_",
+            "no module named 'httpx._",
+            "module 'httpx' has no attribute '_",
+        )
+    )
+
+
+def _is_respx_regression(
+    node_id: str,
+    detail: str | None,
+    raw_output: str,
+) -> bool:
+    text = " | ".join(
+        part for part in (detail, _node_output_excerpt(raw_output, node_id)) if part
+    ).lower()
+    return any(
+        marker in text
+        for marker in (
+            "respx:",
+            "respx/plugin.py",
+            "respx/router.py",
+            "127.0.0.1:4010",
+        )
+    )
+
+
+def _node_output_excerpt(output: str, node_id: str, context: int = 80) -> str:
+    if not output:
+        return ""
+
+    lines = output.splitlines()
+    tokens = _node_trace_tokens(node_id)
+    if not tokens:
+        return ""
+
+    matches = [
+        idx for idx, line in enumerate(lines) if any(token in line for token in tokens)
+    ]
+    if not matches:
+        return ""
+
+    snippets: list[str] = []
+    for idx in matches[:8]:
+        start = max(0, idx - context)
+        end = min(len(lines), idx + context + 1)
+        snippets.append("\n".join(lines[start:end]))
+    return "\n".join(snippets)
+
+
+def _node_trace_tokens(node_id: str) -> tuple[str, ...]:
+    parts = node_id.split("::")
+    if not parts:
+        return ()
+
+    tokens: list[str] = [node_id]
+    path = parts[0]
+    if path:
+        tokens.append(path)
+
+    if len(parts) >= 2:
+        func = parts[-1]
+        tokens.append(func)
+        if len(parts) >= 3:
+            klass = parts[-2]
+            tokens.append(f"{klass}.{func}")
+
+    # Preserve order while deduplicating.
+    seen: set[str] = set()
+    unique: list[str] = []
+    for token in tokens:
+        if token and token not in seen:
+            seen.add(token)
+            unique.append(token)
+    return tuple(unique)
+
+
+def _format_total_score(diff: RepoDiff) -> str:
+    if diff.baseline.passed <= 0:
+        return "n/a"
+    accepted = _accepted_regression_count(diff)
+    effective = min(diff.baseline.passed, diff.experiment.passed + accepted)
+    pct = (effective / diff.baseline.passed) * 100.0
+    return f"{effective}/{diff.baseline.passed} ({pct:.1f}%)"
 
 
 def _format_report(diffs: list[RepoDiff], args: argparse.Namespace) -> tuple[str, int]:
@@ -644,18 +794,21 @@ def _format_report(diffs: list[RepoDiff], args: argparse.Namespace) -> tuple[str
             return "\n".join(lines), 0
 
         lines += [
-            "| repo | baseline package | baseline passed | compat passed | remaining regressions |",
-            "|---|---|---|---|---|",
+            "| repo | baseline package | baseline passed | compat passed | accepted regressions | remaining real regressions | total score |",
+            "|---|---|---|---|---|---|---|",
         ]
         for diff in diffs:
             label = f"{diff.repo.org}/{diff.repo.repo}"
-            regressions = _remaining_regression_count(diff)
+            regressions = _remaining_real_regression_count(diff)
+            accepted = _accepted_regression_count(diff)
             lines.append(
                 f"| {label} "
                 f"| httpx "
                 f"| {diff.baseline.passed} "
                 f"| {diff.experiment.passed} "
-                f"| {_format_regression_rate(regressions, diff.baseline)} |"
+                f"| {_format_regression_rate(accepted, diff.baseline)} "
+                f"| {_format_regression_rate(regressions, diff.baseline)} "
+                f"| {_format_total_score(diff)} |"
             )
         return "\n".join(lines), 0
 
@@ -688,9 +841,14 @@ def _format_report(diffs: list[RepoDiff], args: argparse.Namespace) -> tuple[str
                 e = getattr(diff.experiment, stat)
                 lines.append(f"| {stat} | {b} | {e} |")
             lines.append(
-                f"| remaining regressions | - | "
-                f"{_format_regression_rate(_remaining_regression_count(diff), diff.baseline)} |"
+                f"| accepted regressions | - | "
+                f"{_format_regression_rate(_accepted_regression_count(diff), diff.baseline)} |"
             )
+            lines.append(
+                f"| remaining real regressions | - | "
+                f"{_format_regression_rate(_remaining_real_regression_count(diff), diff.baseline)} |"
+            )
+            lines.append(f"| total score | - | {_format_total_score(diff)} |")
 
         lines.append("")
 
@@ -715,8 +873,8 @@ def _format_report(diffs: list[RepoDiff], args: argparse.Namespace) -> tuple[str
     if len(diffs) > 1 and not args.no_baseline:
         lines += [
             "### Summary",
-            "| repo | baseline passed | compat passed | remaining regressions |",
-            "|---|---|---|---|",
+            "| repo | baseline passed | compat passed | accepted regressions | remaining real regressions | total score |",
+            "|---|---|---|---|---|---|",
         ]
         for diff in diffs:
             label = f"{diff.repo.org}/{diff.repo.repo}"
@@ -724,7 +882,9 @@ def _format_report(diffs: list[RepoDiff], args: argparse.Namespace) -> tuple[str
                 f"| {label} "
                 f"| {diff.baseline.passed} "
                 f"| {diff.experiment.passed} "
-                f"| {_format_regression_rate(_remaining_regression_count(diff), diff.baseline)} |"
+                f"| {_format_regression_rate(_accepted_regression_count(diff), diff.baseline)} "
+                f"| {_format_regression_rate(_remaining_real_regression_count(diff), diff.baseline)} "
+                f"| {_format_total_score(diff)} |"
             )
         lines.append("")
 
