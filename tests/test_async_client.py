@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 import json
+import urllib.parse
 
 import pytest
 import httprs
@@ -116,6 +117,34 @@ async def test_options(server):
     async with httprs.AsyncClient() as client:
         response = await client.options(server.url)
     assert response.status_code == 200
+
+
+@pytest.mark.anyio
+async def test_async_client_default_params_applied_to_request_url(server):
+    async with httprs.AsyncClient(params={"client": "1"}) as client:
+        response = await client.get(server.url + "/json")
+    assert response.status_code == 200
+    assert response.url.query == "client=1"
+
+
+@pytest.mark.anyio
+async def test_async_client_default_params_merged_for_build_request(server):
+    async with httprs.AsyncClient(params={"client": "1", "shared": "client"}) as client:
+        request = client.build_request(
+            "GET",
+            server.url + "/json?url=1&shared=url",
+            params={"request": "1", "shared": "request"},
+        )
+
+    query_pairs = urllib.parse.parse_qsl(
+        request.url.query or "", keep_blank_values=True
+    )
+    assert dict(query_pairs) == {
+        "client": "1",
+        "url": "1",
+        "request": "1",
+        "shared": "request",
+    }
 
 
 @pytest.mark.anyio

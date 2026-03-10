@@ -5,6 +5,7 @@ use crate::models::{version_str, PyHeaders, PyRequest, PyResponse, ResponseStrea
 use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyByteArray, PyBytes, PyDict, PyList, PyTuple};
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -276,12 +277,78 @@ fn immediate_awaitable<'py>(py: Python<'py>, value: Py<PyAny>) -> PyResult<Bound
     pyo3_async_runtimes::tokio::future_into_py(py, async move { Ok(value) })
 }
 
-fn append_query_string(url: &str, query: &str) -> String {
+fn parse_query_pairs(query: &str) -> Vec<(String, String)> {
+    url::form_urlencoded::parse(query.as_bytes())
+        .into_owned()
+        .collect()
+}
+
+fn merge_query_pairs(
+    mut base: Vec<(String, String)>,
+    incoming: Vec<(String, String)>,
+) -> Vec<(String, String)> {
+    if incoming.is_empty() {
+        return base;
+    }
+    let incoming_keys: HashSet<&str> = incoming.iter().map(|(k, _)| k.as_str()).collect();
+    base.retain(|(k, _)| !incoming_keys.contains(k.as_str()));
+    base.extend(incoming);
+    base
+}
+
+fn encode_query_pairs(pairs: &[(String, String)]) -> Option<String> {
+    if pairs.is_empty() {
+        return None;
+    }
+    let mut serializer = url::form_urlencoded::Serializer::new(String::new());
+    for (key, value) in pairs {
+        serializer.append_pair(key, value);
+    }
+    let query = serializer.finish();
     if query.is_empty() {
+        None
+    } else {
+        Some(query)
+    }
+}
+
+fn merge_url_query(url: &str, default_query: Option<&str>, request_query: Option<&str>) -> String {
+    if default_query.is_none() && request_query.is_none() {
         return url.to_string();
     }
-    let sep = if url.contains('?') { "&" } else { "?" };
-    format!("{url}{sep}{query}")
+
+    let (url_without_fragment, fragment) = match url.split_once('#') {
+        Some((head, tail)) => (head, Some(tail)),
+        None => (url, None),
+    };
+    let (base, existing_query) = match url_without_fragment.split_once('?') {
+        Some((head, tail)) => (head, Some(tail)),
+        None => (url_without_fragment, None),
+    };
+
+    let mut merged = default_query
+        .filter(|q| !q.is_empty())
+        .map(parse_query_pairs)
+        .unwrap_or_default();
+
+    if let Some(query) = existing_query.filter(|q| !q.is_empty()) {
+        merged = merge_query_pairs(merged, parse_query_pairs(query));
+    }
+
+    if let Some(query) = request_query.filter(|q| !q.is_empty()) {
+        merged = merge_query_pairs(merged, parse_query_pairs(query));
+    }
+
+    let mut merged_url = base.to_string();
+    if let Some(query) = encode_query_pairs(&merged) {
+        merged_url.push('?');
+        merged_url.push_str(&query);
+    }
+    if let Some(fragment) = fragment {
+        merged_url.push('#');
+        merged_url.push_str(fragment);
+    }
+    merged_url
 }
 
 fn params_to_query(py: Python<'_>, params: Option<Py<PyAny>>) -> PyResult<Option<String>> {
@@ -625,6 +692,7 @@ fn build_async_client(
 pub struct PyClient {
     inner: Option<reqwest::blocking::Client>,
     base_url: Option<String>,
+    default_query: Option<String>,
     default_headers: PyHeaders,
     timeout: PyTimeout,
     follow_redirects: bool,
@@ -711,12 +779,12 @@ impl PyClient {
         default_encoding: Option<Py<PyAny>>,
         block_private_redirects: bool,
     ) -> PyResult<Self> {
-        let _ = params;
         let _ = cookies;
         let _ = cert;
         let _ = mounts;
         let _ = event_hooks;
         let _ = default_encoding;
+        let default_query = params_to_query(py, params)?;
         let default_headers = match headers {
             None => PyHeaders::new_empty(),
             Some(h) => PyHeaders::from_pyobject(py, h)?,
@@ -758,6 +826,7 @@ impl PyClient {
         Ok(PyClient {
             inner: Some(inner),
             base_url,
+            default_query,
             default_headers,
             timeout: py_timeout,
             follow_redirects,
@@ -848,7 +917,8 @@ impl PyClient {
                 &self.limits,
             )?
         };
-        let full_url = self.resolve_url(url);
+        let resolved_url = self.resolve_url(url);
+        let full_url = merge_url_query(&resolved_url, self.default_query.as_deref(), None);
 
         let extra_headers = match headers {
             None => None,
@@ -1243,10 +1313,13 @@ impl PyClient {
                 ));
             }
         };
-        let mut full_url = self.resolve_url(&url_value);
-        if let Some(query) = params_to_query(py, params)? {
-            full_url = append_query_string(&full_url, &query);
-        }
+        let resolved_url = self.resolve_url(&url_value);
+        let request_query = params_to_query(py, params)?;
+        let full_url = merge_url_query(
+            &resolved_url,
+            self.default_query.as_deref(),
+            request_query.as_deref(),
+        );
 
         let mut merged_headers = self.default_headers.clone();
 
@@ -1460,10 +1533,12 @@ impl PyClient {
         timeout: Option<Py<PyAny>>,
     ) -> PyResult<PyStreamContext> {
         let _ = self.get_client()?;
+        let resolved_url = self.resolve_url(url);
+        let stream_url = merge_url_query(&resolved_url, self.default_query.as_deref(), None);
         Ok(PyStreamContext {
             client_inner: self.inner.as_ref().unwrap().clone(), // blocking::Client is Clone
             method: method.to_string(),
-            url: self.resolve_url(url),
+            url: stream_url,
             content: content.unwrap_or_default(),
             json: json.map(|j| j.into_bound(py).into_any().unbind()),
             data: data.map(|d| d.into_bound(py).into_any().unbind()),
@@ -1595,6 +1670,7 @@ impl PyStreamContext {
 pub struct PyAsyncClient {
     inner: Option<reqwest::Client>,
     base_url: Option<String>,
+    default_query: Option<String>,
     default_headers: PyHeaders,
     timeout: PyTimeout,
     follow_redirects: bool,
@@ -1728,12 +1804,12 @@ impl PyAsyncClient {
         default_encoding: Option<Py<PyAny>>,
         block_private_redirects: bool,
     ) -> PyResult<Self> {
-        let _ = params;
         let _ = cookies;
         let _ = cert;
         let _ = mounts;
         let _ = event_hooks;
         let _ = default_encoding;
+        let default_query = params_to_query(py, params)?;
         let default_headers = match headers {
             None => PyHeaders::new_empty(),
             Some(h) => PyHeaders::from_pyobject(py, h)?,
@@ -1774,6 +1850,7 @@ impl PyAsyncClient {
         Ok(PyAsyncClient {
             inner: Some(inner),
             base_url,
+            default_query,
             default_headers,
             timeout: py_timeout,
             follow_redirects,
@@ -1836,7 +1913,8 @@ impl PyAsyncClient {
         timeout: Option<f64>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
-        let full_url = self.resolve_url(&url);
+        let resolved_url = self.resolve_url(&url);
+        let full_url = merge_url_query(&resolved_url, self.default_query.as_deref(), None);
 
         let extra_headers = match headers {
             None => None,
@@ -2150,10 +2228,13 @@ impl PyAsyncClient {
                 ));
             }
         };
-        let mut full_url = self.resolve_url(&url_value);
-        if let Some(query) = params_to_query(py, params)? {
-            full_url = append_query_string(&full_url, &query);
-        }
+        let resolved_url = self.resolve_url(&url_value);
+        let request_query = params_to_query(py, params)?;
+        let full_url = merge_url_query(
+            &resolved_url,
+            self.default_query.as_deref(),
+            request_query.as_deref(),
+        );
 
         let mut merged_headers = self.default_headers.clone();
         if let Some(h) = headers {

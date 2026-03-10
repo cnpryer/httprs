@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import json
 import pathlib
+import urllib.parse
 from datetime import timedelta
 
 import pytest
@@ -120,6 +121,40 @@ def test_build_request_and_send(server):
     assert response.status_code == 200
     data = response.json()
     assert data.get("x-custom-header") == "my-value"
+
+
+def test_client_default_params_applied_to_request_url(server):
+    with httprs.Client(params={"client": "1"}) as client:
+        response = client.get(server.url + "/json")
+    assert response.status_code == 200
+    assert response.url.query == "client=1"
+
+
+def test_client_default_params_merged_for_build_request(server):
+    with httprs.Client(params={"client": "1", "shared": "client"}) as client:
+        request = client.build_request(
+            "GET",
+            server.url + "/json?url=1&shared=url",
+            params={"request": "1", "shared": "request"},
+        )
+
+    query_pairs = urllib.parse.parse_qsl(
+        request.url.query or "", keep_blank_values=True
+    )
+    assert dict(query_pairs) == {
+        "client": "1",
+        "url": "1",
+        "request": "1",
+        "shared": "request",
+    }
+
+
+def test_stream_uses_client_default_params(server):
+    with httprs.Client(params={"stream": "yes"}) as client:
+        with client.stream("GET", server.url + "/json") as response:
+            _ = response.read()
+
+    assert response.url.query == "stream=yes"
 
 
 def test_send_uses_custom_transport():
