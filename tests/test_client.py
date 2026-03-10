@@ -157,6 +157,47 @@ def test_stream_uses_client_default_params(server):
     assert response.url.query == "stream=yes"
 
 
+def test_client_default_cookies_applied_to_requests(server):
+    with httprs.Client(cookies={"session": "abc", "theme": "dark"}) as client:
+        response = client.get(server.url + "/echo_headers")
+
+    cookie_header = response.json().get("cookie", "")
+    cookie_parts = {part.strip() for part in cookie_header.split(";")}
+    assert {"session=abc", "theme=dark"} <= cookie_parts
+
+
+def test_client_default_cookies_allow_request_header_override(server):
+    with httprs.Client(cookies={"session": "abc"}) as client:
+        response = client.get(
+            server.url + "/echo_headers", headers={"cookie": "manual=1"}
+        )
+
+    assert response.json().get("cookie") == "manual=1"
+
+
+def test_send_applies_client_default_cookies(server):
+    with httprs.Client(cookies=httprs.Cookies({"session": "abc"})) as client:
+        request = httprs.Request("GET", server.url + "/echo_headers")
+        response = client.send(request)
+
+    assert response.json().get("cookie") == "session=abc"
+
+
+def test_client_default_cookies_are_origin_scoped(server):
+    alt_url = server.url.replace("127.0.0.1", "localhost", 1)
+    with httprs.Client(cookies={"session": "abc"}) as client:
+        first = client.get(server.url + "/echo_headers")
+        second = client.get(alt_url + "/echo_headers")
+
+    assert first.json().get("cookie") == "session=abc"
+    assert second.json().get("cookie") is None
+
+
+def test_client_rejects_cookie_value_with_semicolon():
+    with pytest.raises(ValueError, match="cookie value contains invalid characters"):
+        httprs.Client(cookies={"session": "abc;admin=true"})
+
+
 def test_send_uses_custom_transport():
     class StaticTransport:
         def handle_request(self, request):

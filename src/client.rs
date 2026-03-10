@@ -1,5 +1,6 @@
 use crate::auth::{PyBasicAuth, PyDigestAuth};
 use crate::config::{PyLimits, PyTimeout};
+use crate::cookies::PyCookies;
 use crate::json::json_dumps;
 use crate::models::{version_str, PyHeaders, PyRequest, PyResponse, ResponseStream};
 use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
@@ -384,6 +385,146 @@ fn params_to_query(py: Python<'_>, params: Option<Py<PyAny>>) -> PyResult<Option
     Ok(None)
 }
 
+#[derive(Default)]
+struct CookieBindingState {
+    pending_pairs: Vec<(String, String)>,
+    bound_origin: Option<String>,
+}
+
+fn cookie_origin_key(url: &url::Url) -> Option<String> {
+    let host = url.host_str()?;
+    let port = url.port_or_known_default()?;
+    Some(format!("{}://{}:{}", url.scheme(), host, port))
+}
+
+fn validate_cookie_pair(name: &str, value: &str) -> PyResult<()> {
+    if name.is_empty() {
+        return Err(PyValueError::new_err("cookie name cannot be empty"));
+    }
+    if name
+        .chars()
+        .any(|c| c.is_ascii_control() || c == ';' || c == '=' || c.is_ascii_whitespace())
+    {
+        return Err(PyValueError::new_err(
+            "cookie name contains invalid characters",
+        ));
+    }
+    if value.chars().any(|c| c.is_ascii_control() || c == ';') {
+        return Err(PyValueError::new_err(
+            "cookie value contains invalid characters",
+        ));
+    }
+    Ok(())
+}
+
+fn parse_cookie_header_pairs(raw: &str) -> PyResult<Vec<(String, String)>> {
+    let mut pairs = Vec::new();
+    for segment in raw.split(';') {
+        let segment = segment.trim();
+        if segment.is_empty() {
+            continue;
+        }
+        let (name, value) = segment
+            .split_once('=')
+            .ok_or_else(|| PyTypeError::new_err("cookies string must be 'name=value' pairs"))?;
+        let name = name.trim();
+        let value = value.trim();
+        validate_cookie_pair(name, value)?;
+        pairs.push((name.to_string(), value.to_string()));
+    }
+    Ok(pairs)
+}
+
+fn parse_cookies_arg(
+    py: Python<'_>,
+    cookies: Option<Py<PyAny>>,
+) -> PyResult<Vec<(String, String)>> {
+    let Some(cookies) = cookies else {
+        return Ok(Vec::new());
+    };
+    let bound = cookies.bind(py);
+    if bound.is_none() {
+        return Ok(Vec::new());
+    }
+
+    if let Ok(raw) = bound.extract::<String>() {
+        return parse_cookie_header_pairs(&raw);
+    }
+
+    if let Ok(parsed) = bound.extract::<PyRef<PyCookies>>() {
+        let mut out = Vec::new();
+        for (name, value) in parsed.items() {
+            validate_cookie_pair(&name, &value)?;
+            out.push((name, value));
+        }
+        return Ok(out);
+    }
+
+    let mut pairs: Vec<(String, String)> = Vec::new();
+
+    if let Ok(dict) = bound.cast::<PyDict>() {
+        for (k, v) in dict.iter() {
+            pairs.push((k.extract()?, v.extract()?));
+        }
+        for (name, value) in &pairs {
+            validate_cookie_pair(name, value)?;
+        }
+        return Ok(pairs);
+    }
+
+    if let Ok(list) = bound.cast::<PyList>() {
+        for item in list.iter() {
+            let (k, v): (String, String) = item.extract()?;
+            pairs.push((k, v));
+        }
+        for (name, value) in &pairs {
+            validate_cookie_pair(name, value)?;
+        }
+        return Ok(pairs);
+    }
+
+    for item in bound.try_iter()? {
+        let (k, v): (String, String) = item?.extract()?;
+        pairs.push((k, v));
+    }
+    for (name, value) in &pairs {
+        validate_cookie_pair(name, value)?;
+    }
+    Ok(pairs)
+}
+
+fn bind_pending_cookies_to_url(
+    cookie_jar: &Arc<reqwest::cookie::Jar>,
+    state: &mut CookieBindingState,
+    url: &url::Url,
+) {
+    let Some(origin) = cookie_origin_key(url) else {
+        return;
+    };
+    if let Some(bound) = &state.bound_origin {
+        if bound != &origin {
+            return;
+        }
+    } else {
+        state.bound_origin = Some(origin);
+    }
+    for (name, value) in state.pending_pairs.drain(..) {
+        cookie_jar.add_cookie_str(&format!("{name}={value}"), url);
+    }
+}
+
+fn bind_default_cookies_for_url(
+    cookie_jar: &Arc<reqwest::cookie::Jar>,
+    cookie_state: &Arc<Mutex<CookieBindingState>>,
+    url: &str,
+) {
+    let Ok(parsed_url) = url::Url::parse(url) else {
+        return;
+    };
+    let mut state = cookie_state.lock().unwrap();
+    bind_pending_cookies_to_url(cookie_jar, &mut state, &parsed_url);
+}
+
 enum AuthKind {
     Basic(String),
     Digest(Py<PyDigestAuth>),
@@ -613,12 +754,13 @@ fn build_blocking_client(
     verify: bool,
     proxy: Option<&str>,
     limits: &PyLimits,
+    cookie_jar: Arc<reqwest::cookie::Jar>,
 ) -> PyResult<reqwest::blocking::Client> {
     let redirect_policy =
         make_redirect_policy(follow_redirects, block_private_redirects, max_redirects);
     let mut client_builder = reqwest::blocking::Client::builder()
         .redirect(redirect_policy)
-        .cookie_store(true);
+        .cookie_provider(cookie_jar);
 
     if !trust_env {
         client_builder = client_builder.no_proxy();
@@ -655,12 +797,13 @@ fn build_async_client(
     verify: bool,
     proxy: Option<&str>,
     limits: &PyLimits,
+    cookie_jar: Arc<reqwest::cookie::Jar>,
 ) -> PyResult<reqwest::Client> {
     let redirect_policy =
         make_redirect_policy(follow_redirects, block_private_redirects, max_redirects);
     let mut client_builder = reqwest::Client::builder()
         .redirect(redirect_policy)
-        .cookie_store(true);
+        .cookie_provider(cookie_jar);
 
     if !trust_env {
         client_builder = client_builder.no_proxy();
@@ -693,6 +836,8 @@ pub struct PyClient {
     inner: Option<reqwest::blocking::Client>,
     base_url: Option<String>,
     default_query: Option<String>,
+    cookie_jar: Arc<reqwest::cookie::Jar>,
+    cookie_state: Arc<Mutex<CookieBindingState>>,
     default_headers: PyHeaders,
     timeout: PyTimeout,
     follow_redirects: bool,
@@ -727,6 +872,10 @@ impl PyClient {
         } else {
             url.to_string()
         }
+    }
+
+    fn bind_default_cookies_for_url(&self, url: &str) {
+        bind_default_cookies_for_url(&self.cookie_jar, &self.cookie_state, url);
     }
 }
 
@@ -779,12 +928,21 @@ impl PyClient {
         default_encoding: Option<Py<PyAny>>,
         block_private_redirects: bool,
     ) -> PyResult<Self> {
-        let _ = cookies;
         let _ = cert;
         let _ = mounts;
         let _ = event_hooks;
         let _ = default_encoding;
         let default_query = params_to_query(py, params)?;
+        let cookie_pairs = parse_cookies_arg(py, cookies)?;
+        let cookie_jar = Arc::new(reqwest::cookie::Jar::default());
+        let cookie_state = Arc::new(Mutex::new(CookieBindingState {
+            pending_pairs: cookie_pairs,
+            bound_origin: None,
+        }));
+        if let Some(base) = base_url.as_deref().and_then(|u| url::Url::parse(u).ok()) {
+            let mut state = cookie_state.lock().unwrap();
+            bind_pending_cookies_to_url(&cookie_jar, &mut state, &base);
+        }
         let default_headers = match headers {
             None => PyHeaders::new_empty(),
             Some(h) => PyHeaders::from_pyobject(py, h)?,
@@ -821,12 +979,15 @@ impl PyClient {
             verify,
             proxy.as_deref(),
             &limits,
+            cookie_jar.clone(),
         )?;
 
         Ok(PyClient {
             inner: Some(inner),
             base_url,
             default_query,
+            cookie_jar,
+            cookie_state,
             default_headers,
             timeout: py_timeout,
             follow_redirects,
@@ -915,10 +1076,12 @@ impl PyClient {
                 self.verify,
                 self.proxy.as_deref(),
                 &self.limits,
+                self.cookie_jar.clone(),
             )?
         };
         let resolved_url = self.resolve_url(url);
         let full_url = merge_url_query(&resolved_url, self.default_query.as_deref(), None);
+        self.bind_default_cookies_for_url(&full_url);
 
         let extra_headers = match headers {
             None => None,
@@ -1471,20 +1634,26 @@ impl PyClient {
                 this.verify,
                 this.proxy.as_deref(),
                 &this.limits,
+                this.cookie_jar.clone(),
             )?
         };
-        let method_str = request.method.clone();
-        let url = request.url.inner.to_string();
-        let mut headers: Vec<(String, String)> = request.headers.inner.clone();
+        let (method_str, url, mut headers, body) = {
+            let req_ref = request_obj.bind(py).borrow();
+            let method_str = req_ref.method.clone();
+            let url = req_ref.url.inner.to_string();
+            let headers = req_ref.headers.inner.clone();
+            let body = if req_ref.content.is_empty() && req_ref.py_stream.is_none() {
+                None
+            } else {
+                Some(req_ref.read(py)?)
+            };
+            (method_str, url, headers, body)
+        };
+        this.bind_default_cookies_for_url(&url);
         if let Some(AuthKind::Basic(header_val)) = &effective_auth {
             headers.retain(|(k, _)| k != "authorization");
             headers.push(("authorization".to_string(), header_val.clone()));
         }
-        let body = if request.content.is_empty() && request.py_stream.is_none() {
-            None
-        } else {
-            Some(request.read(py)?)
-        };
 
         let method = reqwest::Method::from_bytes(method_str.as_bytes())
             .map_err(|_| PyValueError::new_err("Invalid method"))?;
@@ -1535,6 +1704,7 @@ impl PyClient {
         let _ = self.get_client()?;
         let resolved_url = self.resolve_url(url);
         let stream_url = merge_url_query(&resolved_url, self.default_query.as_deref(), None);
+        self.bind_default_cookies_for_url(&stream_url);
         Ok(PyStreamContext {
             client_inner: self.inner.as_ref().unwrap().clone(), // blocking::Client is Clone
             method: method.to_string(),
@@ -1671,6 +1841,8 @@ pub struct PyAsyncClient {
     inner: Option<reqwest::Client>,
     base_url: Option<String>,
     default_query: Option<String>,
+    cookie_jar: Arc<reqwest::cookie::Jar>,
+    cookie_state: Arc<Mutex<CookieBindingState>>,
     default_headers: PyHeaders,
     timeout: PyTimeout,
     follow_redirects: bool,
@@ -1705,6 +1877,10 @@ impl PyAsyncClient {
         } else {
             url.to_string()
         }
+    }
+
+    fn bind_default_cookies_for_url(&self, url: &str) {
+        bind_default_cookies_for_url(&self.cookie_jar, &self.cookie_state, url);
     }
 }
 
@@ -1804,12 +1980,21 @@ impl PyAsyncClient {
         default_encoding: Option<Py<PyAny>>,
         block_private_redirects: bool,
     ) -> PyResult<Self> {
-        let _ = cookies;
         let _ = cert;
         let _ = mounts;
         let _ = event_hooks;
         let _ = default_encoding;
         let default_query = params_to_query(py, params)?;
+        let cookie_pairs = parse_cookies_arg(py, cookies)?;
+        let cookie_jar = Arc::new(reqwest::cookie::Jar::default());
+        let cookie_state = Arc::new(Mutex::new(CookieBindingState {
+            pending_pairs: cookie_pairs,
+            bound_origin: None,
+        }));
+        if let Some(base) = base_url.as_deref().and_then(|u| url::Url::parse(u).ok()) {
+            let mut state = cookie_state.lock().unwrap();
+            bind_pending_cookies_to_url(&cookie_jar, &mut state, &base);
+        }
         let default_headers = match headers {
             None => PyHeaders::new_empty(),
             Some(h) => PyHeaders::from_pyobject(py, h)?,
@@ -1845,12 +2030,15 @@ impl PyAsyncClient {
             verify,
             proxy.as_deref(),
             &limits,
+            cookie_jar.clone(),
         )?;
 
         Ok(PyAsyncClient {
             inner: Some(inner),
             base_url,
             default_query,
+            cookie_jar,
+            cookie_state,
             default_headers,
             timeout: py_timeout,
             follow_redirects,
@@ -1915,6 +2103,7 @@ impl PyAsyncClient {
         let client = self.get_client()?;
         let resolved_url = self.resolve_url(&url);
         let full_url = merge_url_query(&resolved_url, self.default_query.as_deref(), None);
+        self.bind_default_cookies_for_url(&full_url);
 
         let extra_headers = match headers {
             None => None,
@@ -2389,20 +2578,26 @@ impl PyAsyncClient {
                 this.verify,
                 this.proxy.as_deref(),
                 &this.limits,
+                this.cookie_jar.clone(),
             )?
         };
-        let method_str = request.method.clone();
-        let url = request.url.inner.to_string();
-        let mut headers = request.headers.inner.clone();
+        let (method_str, url, mut headers, body) = {
+            let req_ref = request_obj.bind(py).borrow();
+            let method_str = req_ref.method.clone();
+            let url = req_ref.url.inner.to_string();
+            let headers = req_ref.headers.inner.clone();
+            let body = if req_ref.content.is_empty() && req_ref.py_stream.is_none() {
+                None
+            } else {
+                Some(req_ref.read(py)?)
+            };
+            (method_str, url, headers, body)
+        };
+        this.bind_default_cookies_for_url(&url);
         if let Some(AuthKind::Basic(header_val)) = &effective_auth {
             headers.retain(|(k, _)| k != "authorization");
             headers.push(("authorization".to_string(), header_val.clone()));
         }
-        let body = if request.content.is_empty() && request.py_stream.is_none() {
-            None
-        } else {
-            Some(request.read(py)?)
-        };
         let request_obj_stream = request_obj.clone_ref(py);
         let request_obj_regular = request_obj.clone_ref(py);
 
