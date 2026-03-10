@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 import json
+import pathlib
 import urllib.parse
 
 import pytest
@@ -279,6 +280,116 @@ async def test_aclose_closes_client(server):
     assert client.is_closed is True
     with pytest.raises(RuntimeError):
         await client.get(server.url)
+
+
+@pytest.mark.anyio
+async def test_async_client_invalid_cert_pem_raises():
+    with pytest.raises(ValueError, match="invalid client certificate"):
+        httprs.AsyncClient(cert=b"not-a-valid-pem")
+
+
+@pytest.mark.anyio
+async def test_async_client_missing_cert_file_raises():
+    with pytest.raises(ValueError, match="failed to read client cert file"):
+        httprs.AsyncClient(
+            cert=str(pathlib.Path(__file__).parent / "input/missing-client-cert.pem")
+        )
+
+
+@pytest.mark.anyio
+async def test_async_client_accepts_cert_with_combined_pem_bytes(server, mtls_server):
+    async with httprs.AsyncClient(cert=mtls_server.client_pem.read_bytes()) as client:
+        response = await client.get(server.url)
+
+    assert response.status_code == 200
+    assert response.text == "Hello, world!"
+
+
+@pytest.mark.anyio
+async def test_async_client_accepts_cert_with_pathlike_cert_file(server, mtls_server):
+    async with httprs.AsyncClient(cert=mtls_server.client_pem) as client:
+        response = await client.get(server.url)
+
+    assert response.status_code == 200
+    assert response.text == "Hello, world!"
+
+
+@pytest.mark.anyio
+async def test_async_client_accepts_cert_with_cert_key_tuple(server, mtls_server):
+    async with httprs.AsyncClient(
+        cert=(mtls_server.client_cert, mtls_server.client_key)
+    ) as client:
+        response = await client.get(server.url)
+
+    assert response.status_code == 200
+    assert response.text == "Hello, world!"
+
+
+@pytest.mark.anyio
+async def test_async_client_accepts_cert_with_cert_key_list(server, mtls_server):
+    async with httprs.AsyncClient(
+        cert=[mtls_server.client_cert, mtls_server.client_key]
+    ) as client:
+        response = await client.get(server.url)
+
+    assert response.status_code == 200
+    assert response.text == "Hello, world!"
+
+
+@pytest.mark.anyio
+async def test_async_client_rejects_cert_with_verify_disabled_bytes(mtls_server):
+    with pytest.raises(ValueError, match="cert cannot be used when verify=False"):
+        httprs.AsyncClient(cert=mtls_server.client_pem.read_bytes(), verify=False)
+
+
+@pytest.mark.anyio
+async def test_async_client_rejects_cert_with_verify_disabled_pathlike(mtls_server):
+    with pytest.raises(ValueError, match="cert cannot be used when verify=False"):
+        httprs.AsyncClient(cert=mtls_server.client_pem, verify=False)
+
+
+@pytest.mark.anyio
+async def test_async_client_rejects_cert_with_verify_disabled_tuple(mtls_server):
+    with pytest.raises(ValueError, match="cert cannot be used when verify=False"):
+        httprs.AsyncClient(
+            cert=(mtls_server.client_cert, mtls_server.client_key), verify=False
+        )
+
+
+@pytest.mark.anyio
+async def test_async_client_rejects_cert_with_verify_disabled_list(mtls_server):
+    with pytest.raises(ValueError, match="cert cannot be used when verify=False"):
+        httprs.AsyncClient(
+            cert=[mtls_server.client_cert, mtls_server.client_key], verify=False
+        )
+
+
+@pytest.mark.anyio
+async def test_async_client_mtls_without_cert_fails_connect(mtls_server):
+    async with httprs.AsyncClient(verify=False) as client:
+        with pytest.raises(httprs.RequestError):
+            await client.get(mtls_server.url)
+
+
+@pytest.mark.anyio
+async def test_async_client_cert_does_not_bypass_server_verification(mtls_server):
+    async with httprs.AsyncClient(cert=mtls_server.client_pem) as client:
+        with pytest.raises(httprs.RequestError):
+            await client.get(mtls_server.url)
+
+
+@pytest.mark.anyio
+async def test_async_client_send_follow_redirect_override_preserves_cert(
+    server, mtls_server
+):
+    async with httprs.AsyncClient(
+        cert=mtls_server.client_pem, follow_redirects=False
+    ) as client:
+        request = client.build_request("GET", server.url + "/redirect_301")
+        response = await client.send(request, follow_redirects=True)
+
+    assert response.status_code == 200
+    assert response.text == "Hello, world!"
 
 
 @pytest.mark.anyio
