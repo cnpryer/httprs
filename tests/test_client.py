@@ -291,6 +291,56 @@ def test_client_rejects_mount_with_non_string_key():
         httprs.Client(mounts={1: object()})
 
 
+def test_client_request_event_hooks_apply_to_network_requests(server):
+    events = []
+
+    def on_request(request):
+        events.append(("request", request.method))
+        request.set_header("x-event-hook", "sync")
+
+    def on_response(response):
+        events.append(("response", response.status_code))
+
+    with httprs.Client(
+        event_hooks={"request": [on_request], "response": [on_response]}
+    ) as client:
+        response = client.get(server.url + "/echo_headers")
+
+    assert response.status_code == 200
+    assert response.json().get("x-event-hook") == "sync"
+    assert events == [("request", "GET"), ("response", 200)]
+
+
+def test_client_send_event_hooks_apply_to_mounted_transport():
+    events = []
+
+    class ApiTransport:
+        def handle_request(self, request):
+            return httprs.Response(
+                299,
+                text=request.headers.get("x-event-hook", ""),
+                request=request,
+            )
+
+    def on_request(request):
+        request.set_header("x-event-hook", "mounted")
+        events.append("request")
+
+    def on_response(response):
+        events.append(("response", response.status_code, response.text))
+
+    with httprs.Client(
+        event_hooks={"request": [on_request], "response": [on_response]},
+        mounts={"https://example.com/api/": ApiTransport()},
+    ) as client:
+        request = client.build_request("GET", "https://example.com/api/items")
+        response = client.send(request)
+
+    assert response.status_code == 299
+    assert response.text == "mounted"
+    assert events == ["request", ("response", 299, "mounted")]
+
+
 def test_send_auth_argument_basic(server):
     with httprs.Client() as client:
         request = client.build_request("GET", server.url + "/echo_headers")
