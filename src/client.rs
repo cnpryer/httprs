@@ -532,6 +532,11 @@ enum AuthKind {
     Digest(Py<PyDigestAuth>),
 }
 
+struct MountTransport {
+    prefix: String,
+    transport: Py<PyAny>,
+}
+
 fn extract_auth(py: Python<'_>, auth: &Py<PyAny>) -> PyResult<AuthKind> {
     let bound = auth.bind(py);
     if let Ok(basic) = bound.extract::<PyRef<PyBasicAuth>>() {
@@ -755,6 +760,101 @@ fn parse_cert_arg(py: Python<'_>, cert: Option<Py<PyAny>>) -> PyResult<Option<re
     Ok(Some(identity))
 }
 
+fn mount_prefix_matches(url: &str, prefix: &str) -> bool {
+    if !url.starts_with(prefix) {
+        return false;
+    }
+    if url.len() == prefix.len() {
+        return true;
+    }
+    if prefix.ends_with("://")
+        || prefix.ends_with('/')
+        || prefix.ends_with('?')
+        || prefix.ends_with('#')
+    {
+        return true;
+    }
+    matches!(url.as_bytes()[prefix.len()], b'/' | b'?' | b'#' | b':')
+}
+
+fn parse_mounts_arg(py: Python<'_>, mounts: Option<Py<PyAny>>) -> PyResult<Vec<MountTransport>> {
+    let Some(mounts) = mounts else {
+        return Ok(Vec::new());
+    };
+    let bound = mounts.bind(py);
+    if bound.is_none() {
+        return Ok(Vec::new());
+    }
+
+    let mut parsed = Vec::new();
+    if let Ok(dict) = bound.cast::<PyDict>() {
+        for (k, v) in dict.iter() {
+            let prefix: String = k
+                .extract()
+                .map_err(|_| PyTypeError::new_err("mount keys must be strings"))?;
+            if prefix.is_empty() {
+                return Err(PyValueError::new_err("mount prefix cannot be empty"));
+            }
+            if v.is_none() {
+                return Err(PyTypeError::new_err("mount transport cannot be None"));
+            }
+            parsed.push(MountTransport {
+                prefix,
+                transport: v.unbind(),
+            });
+        }
+        return Ok(parsed);
+    }
+
+    let iter = bound.try_iter().map_err(|_| {
+        PyTypeError::new_err("mounts must be a mapping or iterable of (prefix, transport) pairs")
+    })?;
+    for item in iter {
+        let item = item?;
+        let tuple = item
+            .cast::<PyTuple>()
+            .map_err(|_| PyTypeError::new_err("mount entries must be (prefix, transport) pairs"))?;
+        if tuple.len() != 2 {
+            return Err(PyTypeError::new_err(
+                "mount entries must be (prefix, transport) pairs",
+            ));
+        }
+        let prefix: String = tuple
+            .get_item(0)?
+            .extract()
+            .map_err(|_| PyTypeError::new_err("mount keys must be strings"))?;
+        if prefix.is_empty() {
+            return Err(PyValueError::new_err("mount prefix cannot be empty"));
+        }
+        let transport = tuple.get_item(1)?;
+        if transport.is_none() {
+            return Err(PyTypeError::new_err("mount transport cannot be None"));
+        }
+        parsed.push(MountTransport {
+            prefix,
+            transport: transport.unbind(),
+        });
+    }
+    Ok(parsed)
+}
+
+fn select_mounted_transport(
+    py: Python<'_>,
+    mounts: &[MountTransport],
+    url: &str,
+) -> Option<Py<PyAny>> {
+    let mut selected: Option<&MountTransport> = None;
+    for mount in mounts {
+        if !mount_prefix_matches(url, &mount.prefix) {
+            continue;
+        }
+        if selected.is_none_or(|current| mount.prefix.len() > current.prefix.len()) {
+            selected = Some(mount);
+        }
+    }
+    selected.map(|mount| mount.transport.clone_ref(py))
+}
+
 fn parse_verify_arg(py: Python<'_>, verify: Option<Py<PyAny>>) -> bool {
     let Some(verify) = verify else {
         return true;
@@ -949,6 +1049,7 @@ pub struct PyClient {
     http2: bool,
     default_auth: Option<AuthKind>,
     transport: Option<Py<PyAny>>,
+    mounts: Vec<MountTransport>,
 }
 
 impl PyClient {
@@ -974,6 +1075,14 @@ impl PyClient {
 
     fn bind_default_cookies_for_url(&self, url: &str) {
         bind_default_cookies_for_url(&self.cookie_jar, &self.cookie_state, url);
+    }
+
+    fn transport_for_url(&self, py: Python<'_>, url: &str) -> Option<Py<PyAny>> {
+        select_mounted_transport(py, &self.mounts, url).or_else(|| {
+            self.transport
+                .as_ref()
+                .map(|transport| transport.clone_ref(py))
+        })
     }
 }
 
@@ -1026,12 +1135,12 @@ impl PyClient {
         default_encoding: Option<Py<PyAny>>,
         block_private_redirects: bool,
     ) -> PyResult<Self> {
-        let _ = mounts;
         let _ = event_hooks;
         let _ = default_encoding;
         let default_query = params_to_query(py, params)?;
         let cookie_pairs = parse_cookies_arg(py, cookies)?;
         let cert_identity = parse_cert_arg(py, cert)?;
+        let mounts = parse_mounts_arg(py, mounts)?;
         let cookie_jar = Arc::new(reqwest::cookie::Jar::default());
         let cookie_state = Arc::new(Mutex::new(CookieBindingState {
             pending_pairs: cookie_pairs,
@@ -1101,6 +1210,7 @@ impl PyClient {
             http2,
             default_auth,
             transport,
+            mounts,
         })
     }
 
@@ -1699,9 +1809,13 @@ impl PyClient {
         };
         let effective_auth = req_auth.or(default_auth);
         let request_obj = Py::new(py, request.clone())?;
-        let transport_obj: Option<Py<PyAny>> = {
+        let request_url = {
+            let req_ref = request_obj.bind(py).borrow();
+            req_ref.url.inner.to_string()
+        };
+        let transport_obj = {
             let this = slf.borrow();
-            this.transport.as_ref().map(|t| t.clone_ref(py))
+            this.transport_for_url(py, &request_url)
         };
         if let Some(AuthKind::Basic(header_val)) = &effective_auth {
             let mut req_mut = request_obj.bind(py).borrow_mut();
@@ -1960,6 +2074,7 @@ pub struct PyAsyncClient {
     http2: bool,
     default_auth: Option<AuthKind>,
     transport: Option<Py<PyAny>>,
+    mounts: Vec<MountTransport>,
 }
 
 impl PyAsyncClient {
@@ -1985,6 +2100,14 @@ impl PyAsyncClient {
 
     fn bind_default_cookies_for_url(&self, url: &str) {
         bind_default_cookies_for_url(&self.cookie_jar, &self.cookie_state, url);
+    }
+
+    fn transport_for_url(&self, py: Python<'_>, url: &str) -> Option<Py<PyAny>> {
+        select_mounted_transport(py, &self.mounts, url).or_else(|| {
+            self.transport
+                .as_ref()
+                .map(|transport| transport.clone_ref(py))
+        })
     }
 }
 
@@ -2084,12 +2207,12 @@ impl PyAsyncClient {
         default_encoding: Option<Py<PyAny>>,
         block_private_redirects: bool,
     ) -> PyResult<Self> {
-        let _ = mounts;
         let _ = event_hooks;
         let _ = default_encoding;
         let default_query = params_to_query(py, params)?;
         let cookie_pairs = parse_cookies_arg(py, cookies)?;
         let cert_identity = parse_cert_arg(py, cert)?;
+        let mounts = parse_mounts_arg(py, mounts)?;
         let cookie_jar = Arc::new(reqwest::cookie::Jar::default());
         let cookie_state = Arc::new(Mutex::new(CookieBindingState {
             pending_pairs: cookie_pairs,
@@ -2158,6 +2281,7 @@ impl PyAsyncClient {
             http2,
             default_auth,
             transport,
+            mounts,
         })
     }
 
@@ -2643,10 +2767,13 @@ impl PyAsyncClient {
         };
         let effective_auth = req_auth.or(default_auth);
         let request_obj = Py::new(py, request.clone())?;
-
-        let transport_obj: Option<Py<PyAny>> = {
+        let request_url = {
+            let req_ref = request_obj.bind(py).borrow();
+            req_ref.url.inner.to_string()
+        };
+        let transport_obj = {
             let this = slf.borrow();
-            this.transport.as_ref().map(|t| t.clone_ref(py))
+            this.transport_for_url(py, &request_url)
         };
         if let Some(AuthKind::Basic(header_val)) = &effective_auth {
             let mut req_mut = request_obj.bind(py).borrow_mut();
