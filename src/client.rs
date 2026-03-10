@@ -2,7 +2,10 @@ use crate::auth::{PyBasicAuth, PyDigestAuth};
 use crate::config::{PyLimits, PyTimeout};
 use crate::cookies::PyCookies;
 use crate::json::json_dumps;
-use crate::models::{version_str, PyHeaders, PyRequest, PyResponse, PyURL, ResponseStream};
+use crate::models::{
+    parse_default_encoding_arg, version_str, PyHeaders, PyRequest, PyResponse, PyURL,
+    ResponseStream,
+};
 use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyByteArray, PyBytes, PyDict, PyList, PyTuple};
@@ -1210,6 +1213,7 @@ pub struct PyClient {
     transport: Option<Py<PyAny>>,
     mounts: Vec<MountTransport>,
     event_hooks: EventHooks,
+    default_encoding: Option<Py<PyAny>>,
 }
 
 impl PyClient {
@@ -1295,7 +1299,7 @@ impl PyClient {
         default_encoding: Option<Py<PyAny>>,
         block_private_redirects: bool,
     ) -> PyResult<Self> {
-        let _ = default_encoding;
+        let default_encoding = parse_default_encoding_arg(py, default_encoding)?;
         let default_query = params_to_query(py, params)?;
         let cookie_pairs = parse_cookies_arg(py, cookies)?;
         let cert_identity = parse_cert_arg(py, cert)?;
@@ -1372,6 +1376,7 @@ impl PyClient {
             transport,
             mounts,
             event_hooks,
+            default_encoding,
         })
     }
 
@@ -1467,6 +1472,10 @@ impl PyClient {
             None => None,
         };
         let effective_auth = req_auth.as_ref().or(self.default_auth.as_ref());
+        let client_default_encoding = self
+            .default_encoding
+            .as_ref()
+            .map(|encoding| encoding.clone_ref(py));
 
         let body = build_body(py, content, json, data)?;
         let request_hooks = clone_hooks(py, &self.event_hooks.request);
@@ -1522,8 +1531,14 @@ impl PyClient {
             let start = Instant::now();
             let resp = send_request(&request_obj)?;
             let elapsed = start.elapsed().as_millis();
-            let first_response =
-                PyResponse::from_blocking(resp, elapsed, Some(request_obj.clone_ref(py)))?;
+            let first_response = PyResponse::from_blocking(
+                resp,
+                elapsed,
+                Some(request_obj.clone_ref(py)),
+                client_default_encoding
+                    .as_ref()
+                    .map(|encoding| encoding.clone_ref(py)),
+            )?;
             let first_response_obj = Py::new(py, first_response)?;
             let first_response_any = first_response_obj.clone_ref(py).into_any();
             run_sync_response_hooks(py, &response_hooks, &first_response_any)?;
@@ -1571,6 +1586,9 @@ impl PyClient {
                     resp2,
                     elapsed,
                     Some(second_request_obj.clone_ref(py)),
+                    client_default_encoding
+                        .as_ref()
+                        .map(|encoding| encoding.clone_ref(py)),
                 )?;
                 let second_response_obj = Py::new(py, second_response)?;
                 let second_response_any = second_response_obj.clone_ref(py).into_any();
@@ -1583,8 +1601,12 @@ impl PyClient {
             let start = Instant::now();
             let resp = send_request(&request_obj)?;
             let elapsed = start.elapsed().as_millis();
-            let response =
-                PyResponse::from_blocking(resp, elapsed, Some(request_obj.clone_ref(py)))?;
+            let response = PyResponse::from_blocking(
+                resp,
+                elapsed,
+                Some(request_obj.clone_ref(py)),
+                client_default_encoding,
+            )?;
             let response_obj = Py::new(py, response)?;
             let response_any = response_obj.clone_ref(py).into_any();
             run_sync_response_hooks(py, &response_hooks, &response_any)?;
@@ -1995,12 +2017,15 @@ impl PyClient {
             Some(ref a) => Some(extract_auth(py, a)?),
             None => None,
         };
-        let (default_auth, request_hooks, response_hooks) = {
+        let (default_auth, request_hooks, response_hooks, client_default_encoding) = {
             let this = slf.borrow();
             (
                 this.default_auth.as_ref().map(|a| clone_auth_kind(py, a)),
                 clone_hooks(py, &this.event_hooks.request),
                 clone_hooks(py, &this.event_hooks.response),
+                this.default_encoding
+                    .as_ref()
+                    .map(|encoding| encoding.clone_ref(py)),
             )
         };
         let effective_auth = req_auth.or(default_auth);
@@ -2028,6 +2053,9 @@ impl PyClient {
                     if py_response.request.is_none() {
                         py_response.request = Some(request_obj.clone_ref(py));
                     }
+                    py_response.default_encoding = client_default_encoding
+                        .as_ref()
+                        .map(|encoding| encoding.clone_ref(py));
                 }
                 let response_obj = response.unbind();
                 run_sync_response_hooks(py, &response_hooks, &response_obj)?;
@@ -2070,9 +2098,23 @@ impl PyClient {
         let response = result.map_err(crate::map_reqwest_error)?;
         let elapsed = start.elapsed().as_millis();
         let py_response = if stream {
-            PyResponse::from_blocking_stream(response, elapsed, Some(request_obj.clone_ref(py)))
+            PyResponse::from_blocking_stream(
+                response,
+                elapsed,
+                Some(request_obj.clone_ref(py)),
+                client_default_encoding
+                    .as_ref()
+                    .map(|encoding| encoding.clone_ref(py)),
+            )
         } else {
-            PyResponse::from_blocking(response, elapsed, Some(request_obj.clone_ref(py)))?
+            PyResponse::from_blocking(
+                response,
+                elapsed,
+                Some(request_obj.clone_ref(py)),
+                client_default_encoding
+                    .as_ref()
+                    .map(|encoding| encoding.clone_ref(py)),
+            )?
         };
         let response_obj = Py::new(py, py_response)?;
         let response_any = response_obj.clone_ref(py).into_any();
@@ -2121,6 +2163,10 @@ impl PyClient {
             auth: auth.map(|a| extract_auth(py, &a)).transpose()?,
             timeout: parse_timeout_arg(py, timeout, &self.timeout),
             default_headers: self.default_headers.clone(),
+            default_encoding: self
+                .default_encoding
+                .as_ref()
+                .map(|encoding| encoding.clone_ref(py)),
             response: None,
         })
     }
@@ -2187,6 +2233,7 @@ pub struct PyStreamContext {
     auth: Option<AuthKind>,
     timeout: Option<Duration>,
     default_headers: PyHeaders,
+    default_encoding: Option<Py<PyAny>>,
     response: Option<Arc<Mutex<Option<ResponseStream>>>>,
 }
 
@@ -2220,7 +2267,14 @@ impl PyStreamContext {
         let resp = crate::without_gil(move || builder.send().map_err(crate::map_reqwest_error))?;
         let elapsed = start.elapsed().as_millis();
 
-        let py_resp = PyResponse::from_blocking_stream(resp, elapsed, None);
+        let py_resp = PyResponse::from_blocking_stream(
+            resp,
+            elapsed,
+            None,
+            slf.default_encoding
+                .as_ref()
+                .map(|encoding| encoding.clone_ref(py)),
+        );
         slf.response = py_resp.stream.clone();
         Ok(py_resp)
     }
@@ -2263,6 +2317,7 @@ pub struct PyAsyncClient {
     transport: Option<Py<PyAny>>,
     mounts: Vec<MountTransport>,
     event_hooks: EventHooks,
+    default_encoding: Option<Py<PyAny>>,
 }
 
 impl PyAsyncClient {
@@ -2304,6 +2359,7 @@ async fn convert_async_response(
     resp: reqwest::Response,
     elapsed_ms: u128,
     request: Option<Py<PyRequest>>,
+    default_encoding: Option<Py<PyAny>>,
 ) -> PyResult<PyResponse> {
     let status = resp.status();
     let status_code = status.as_u16();
@@ -2340,6 +2396,7 @@ async fn convert_async_response(
         url,
         request,
         encoding,
+        default_encoding,
         extensions: None,
         stream: None,
         py_stream: None,
@@ -2395,7 +2452,7 @@ impl PyAsyncClient {
         default_encoding: Option<Py<PyAny>>,
         block_private_redirects: bool,
     ) -> PyResult<Self> {
-        let _ = default_encoding;
+        let default_encoding = parse_default_encoding_arg(py, default_encoding)?;
         let default_query = params_to_query(py, params)?;
         let cookie_pairs = parse_cookies_arg(py, cookies)?;
         let cert_identity = parse_cert_arg(py, cert)?;
@@ -2471,6 +2528,7 @@ impl PyAsyncClient {
             transport,
             mounts,
             event_hooks,
+            default_encoding,
         })
     }
 
@@ -2525,6 +2583,10 @@ impl PyAsyncClient {
         self.bind_default_cookies_for_url(&full_url);
         let request_hooks = clone_hooks(py, &self.event_hooks.request);
         let response_hooks = clone_hooks(py, &self.event_hooks.response);
+        let client_default_encoding = self
+            .default_encoding
+            .as_ref()
+            .map(|encoding| encoding.clone_ref(py));
 
         let extra_headers = match headers {
             None => None,
@@ -2607,8 +2669,13 @@ impl PyAsyncClient {
             let response = builder.send().await.map_err(crate::map_reqwest_error)?;
             let elapsed = start.elapsed().as_millis();
             let request_for_response = Python::attach(|py| request_obj.clone_ref(py));
-            let response =
-                convert_async_response(response, elapsed, Some(request_for_response)).await?;
+            let response = convert_async_response(
+                response,
+                elapsed,
+                Some(request_for_response),
+                client_default_encoding,
+            )
+            .await?;
             let response_obj =
                 Python::attach(|py| Py::new(py, response).map(|obj| obj.into_any()))?;
             run_async_response_hooks(
@@ -2970,12 +3037,15 @@ impl PyAsyncClient {
             Some(ref a) => Some(extract_auth(py, a)?),
             None => None,
         };
-        let (default_auth, request_hooks, response_hooks) = {
+        let (default_auth, request_hooks, response_hooks, client_default_encoding) = {
             let this = slf.borrow();
             (
                 this.default_auth.as_ref().map(|a| clone_auth_kind(py, a)),
                 clone_hooks(py, &this.event_hooks.request),
                 clone_hooks(py, &this.event_hooks.response),
+                this.default_encoding
+                    .as_ref()
+                    .map(|encoding| encoding.clone_ref(py)),
             )
         };
         let effective_auth = req_auth.or(default_auth);
@@ -3021,6 +3091,9 @@ impl PyAsyncClient {
                             if py_response.request.is_none() {
                                 py_response.request = Some(request_obj_for_response.clone_ref(py));
                             }
+                            py_response.default_encoding = client_default_encoding
+                                .as_ref()
+                                .map(|encoding| encoding.clone_ref(py));
                         }
                         Ok::<(), PyErr>(())
                     })?;
@@ -3049,6 +3122,9 @@ impl PyAsyncClient {
                             if py_response.request.is_none() {
                                 py_response.request = Some(request_obj_for_response.clone_ref(py));
                             }
+                            py_response.default_encoding = client_default_encoding
+                                .as_ref()
+                                .map(|encoding| encoding.clone_ref(py));
                         }
                         Ok::<Py<PyAny>, PyErr>(response.unbind())
                     })?;
@@ -3085,6 +3161,9 @@ impl PyAsyncClient {
         let request_obj_for_hooks = request_obj.clone_ref(py);
         let request_obj_stream = request_obj.clone_ref(py);
         let request_obj_regular = request_obj.clone_ref(py);
+        let stream_default_encoding = client_default_encoding
+            .as_ref()
+            .map(|encoding| encoding.clone_ref(py));
 
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             run_async_request_hooks(request_hooks, request_obj_for_hooks).await?;
@@ -3103,12 +3182,21 @@ impl PyAsyncClient {
             let response = builder.send().await.map_err(crate::map_reqwest_error)?;
             let elapsed = start.elapsed().as_millis();
             let response_obj = if stream {
-                let response =
-                    PyResponse::from_async_stream(response, elapsed, Some(request_obj_stream));
+                let response = PyResponse::from_async_stream(
+                    response,
+                    elapsed,
+                    Some(request_obj_stream),
+                    stream_default_encoding,
+                );
                 Python::attach(|py| Py::new(py, response).map(|obj| obj.into_any()))?
             } else {
-                let response =
-                    convert_async_response(response, elapsed, Some(request_obj_regular)).await?;
+                let response = convert_async_response(
+                    response,
+                    elapsed,
+                    Some(request_obj_regular),
+                    client_default_encoding,
+                )
+                .await?;
                 Python::attach(|py| Py::new(py, response).map(|obj| obj.into_any()))?
             };
             run_async_response_hooks(
