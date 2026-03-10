@@ -230,6 +230,36 @@ async def test_custom_headers(server):
 
 
 @pytest.mark.anyio
+async def test_async_client_default_encoding_applies_when_charset_missing(server):
+    async with httprs.AsyncClient(default_encoding="latin-1") as client:
+        response = await client.post(server.url + "/echo_body", content=b"\xe9")
+    assert response.status_code == 200
+    assert response.text == "é"
+
+
+@pytest.mark.anyio
+async def test_async_client_default_encoding_applies_for_decode_fallback():
+    class CharsetTransport:
+        async def handle_async_request(self, request):
+            return httprs.Response(
+                200,
+                content=b"\xe9",
+                headers={"content-type": "text/plain; charset=utf-8"},
+                request=request,
+            )
+
+    async with httprs.AsyncClient(
+        default_encoding="latin-1",
+        transport=CharsetTransport(),
+    ) as client:
+        request = client.build_request("GET", "https://example.com/")
+        response = await client.send(request)
+
+    assert response.status_code == 200
+    assert response.text == "é"
+
+
+@pytest.mark.anyio
 async def test_basic_auth(server):
     async with httprs.AsyncClient() as client:
         response = await client.get(

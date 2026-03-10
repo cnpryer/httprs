@@ -1,6 +1,8 @@
 use crate::json::json_dumps;
 use crate::transports::PySyncByteStream;
-use pyo3::exceptions::{PyKeyError, PyTypeError, PyUnicodeDecodeError, PyValueError};
+use pyo3::exceptions::{
+    PyKeyError, PyLookupError, PyTypeError, PyUnicodeDecodeError, PyValueError,
+};
 use pyo3::prelude::*;
 use pyo3::types::{PyByteArray, PyBytes, PyDelta, PyDict, PyList};
 type PyObject = Py<PyAny>;
@@ -101,6 +103,25 @@ fn append_body_chunk(item: &Bound<'_, PyAny>, out: &mut Vec<u8>) -> PyResult<()>
 
 fn encode_json_body(value: &Bound<'_, PyAny>) -> PyResult<Vec<u8>> {
     Ok(json_dumps(value)?.into_bytes())
+}
+
+pub fn parse_default_encoding_arg(
+    py: Python<'_>,
+    default_encoding: Option<Py<PyAny>>,
+) -> PyResult<Option<Py<PyAny>>> {
+    let Some(default_encoding) = default_encoding else {
+        return Ok(None);
+    };
+    let bound = default_encoding.bind(py);
+    if bound.is_none() {
+        return Ok(None);
+    }
+    if bound.extract::<String>().is_ok() || bound.is_callable() {
+        return Ok(Some(default_encoding));
+    }
+    Err(PyTypeError::new_err(
+        "default_encoding must be a string, callable, or None",
+    ))
 }
 
 fn immediate_awaitable<'py>(py: Python<'py>, value: Py<PyAny>) -> PyResult<Bound<'py, PyAny>> {
@@ -737,6 +758,7 @@ pub struct PyResponse {
     pub url: String,
     pub request: Option<Py<PyRequest>>,
     pub encoding: Option<String>,
+    pub default_encoding: Option<Py<PyAny>>,
     pub extensions: Option<Py<PyAny>>,
     // Streaming: Some(response) while stream is unread, None after read.
     pub stream: Option<Arc<Mutex<Option<ResponseStream>>>>,
@@ -761,6 +783,35 @@ fn charset_from_content_type(ct: Option<&str>) -> Option<String> {
             }
         })
     })
+}
+
+fn resolve_default_encoding(
+    py: Python<'_>,
+    default_encoding: Option<&Py<PyAny>>,
+    content: &[u8],
+) -> PyResult<Option<String>> {
+    let Some(default_encoding) = default_encoding else {
+        return Ok(None);
+    };
+    let bound = default_encoding.bind(py);
+    if let Ok(encoding) = bound.extract::<String>() {
+        return Ok(Some(encoding));
+    }
+    let result = bound.call1((PyBytes::new(py, content),))?;
+    result.extract::<String>().map(Some).map_err(|_| {
+        PyTypeError::new_err("default_encoding callable must return a string encoding name")
+    })
+}
+
+fn decode_content_with_encoding(
+    py: Python<'_>,
+    content: &[u8],
+    encoding: &str,
+    errors: &str,
+) -> PyResult<String> {
+    PyBytes::new(py, content)
+        .call_method1("decode", (encoding, errors))?
+        .extract::<String>()
 }
 
 /// Map HTTP version enum to string.
@@ -816,6 +867,7 @@ impl PyResponse {
         resp: reqwest::blocking::Response,
         elapsed_ms: u128,
         request: Option<Py<PyRequest>>,
+        default_encoding: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
         let status = resp.status();
         let status_code = status.as_u16();
@@ -838,6 +890,7 @@ impl PyResponse {
             url,
             request,
             encoding,
+            default_encoding,
             extensions: None,
             stream: None,
             py_stream: None,
@@ -849,6 +902,7 @@ impl PyResponse {
         resp: reqwest::blocking::Response,
         elapsed_ms: u128,
         request: Option<Py<PyRequest>>,
+        default_encoding: Option<Py<PyAny>>,
     ) -> Self {
         let status = resp.status();
         let status_code = status.as_u16();
@@ -867,6 +921,7 @@ impl PyResponse {
             url,
             request,
             encoding,
+            default_encoding,
             extensions: None,
             stream: Some(Arc::new(Mutex::new(Some(ResponseStream::Blocking(resp))))),
             py_stream: None,
@@ -878,6 +933,7 @@ impl PyResponse {
         resp: reqwest::Response,
         elapsed_ms: u128,
         request: Option<Py<PyRequest>>,
+        default_encoding: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
         let status = resp.status();
         let status_code = status.as_u16();
@@ -902,6 +958,7 @@ impl PyResponse {
             url,
             request,
             encoding,
+            default_encoding,
             extensions: None,
             stream: None,
             py_stream: None,
@@ -913,6 +970,7 @@ impl PyResponse {
         resp: reqwest::Response,
         elapsed_ms: u128,
         request: Option<Py<PyRequest>>,
+        default_encoding: Option<Py<PyAny>>,
     ) -> Self {
         let status = resp.status();
         let status_code = status.as_u16();
@@ -932,6 +990,7 @@ impl PyResponse {
             url,
             request,
             encoding,
+            default_encoding,
             extensions: None,
             stream: Some(Arc::new(Mutex::new(Some(ResponseStream::Async(resp))))),
             py_stream: None,
@@ -978,7 +1037,7 @@ impl PyResponse {
         http_version: Option<String>,
     ) -> PyResult<Self> {
         let _ = history;
-        let _ = default_encoding;
+        let default_encoding = parse_default_encoding_arg(py, default_encoding)?;
         let reason_phrase = reqwest::StatusCode::from_u16(status_code)
             .ok()
             .and_then(|s| s.canonical_reason())
@@ -1059,6 +1118,7 @@ impl PyResponse {
             url: String::new(),
             request,
             encoding,
+            default_encoding,
             extensions,
             stream: None,
             py_stream,
@@ -1165,8 +1225,40 @@ impl PyResponse {
     /// Decode content to text using the response encoding (defaults to UTF-8).
     #[getter]
     pub fn text(&self) -> PyResult<String> {
-        String::from_utf8(self.content.clone())
-            .map_err(|e| PyUnicodeDecodeError::new_err(format!("Failed to decode response: {}", e)))
+        if self.content.is_empty() {
+            return Ok(String::new());
+        }
+        Python::attach(|py| {
+            if let Some(header_encoding) = self.encoding.as_deref() {
+                match decode_content_with_encoding(py, &self.content, header_encoding, "strict") {
+                    Ok(text) => return Ok(text),
+                    Err(err)
+                        if err.is_instance_of::<PyUnicodeDecodeError>(py)
+                            || err.is_instance_of::<PyLookupError>(py) => {}
+                    Err(err) => return Err(err),
+                }
+            }
+
+            let default_encoding =
+                resolve_default_encoding(py, self.default_encoding.as_ref(), &self.content)?;
+            if let Some(default_encoding) = default_encoding.as_deref() {
+                match decode_content_with_encoding(py, &self.content, default_encoding, "strict") {
+                    Ok(text) => return Ok(text),
+                    Err(err)
+                        if err.is_instance_of::<PyUnicodeDecodeError>(py)
+                            || err.is_instance_of::<PyLookupError>(py) => {}
+                    Err(err) => return Err(err),
+                }
+                return decode_content_with_encoding(
+                    py,
+                    &self.content,
+                    default_encoding,
+                    "replace",
+                );
+            }
+
+            decode_content_with_encoding(py, &self.content, "utf-8", "replace")
+        })
     }
 
     /// Parse response body as JSON.

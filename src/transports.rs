@@ -145,7 +145,7 @@ impl PyHTTPTransport {
         let start = Instant::now();
         let response = crate::without_gil(|| builder.send()).map_err(crate::map_reqwest_error)?;
         let elapsed = start.elapsed().as_millis();
-        PyResponse::from_blocking(response, elapsed, None)
+        PyResponse::from_blocking(response, elapsed, None, None)
     }
 
     pub fn close(&mut self) {
@@ -217,7 +217,7 @@ impl PyAsyncHTTPTransport {
             let start = Instant::now();
             let response = builder.send().await.map_err(crate::map_reqwest_error)?;
             let elapsed = start.elapsed().as_millis();
-            PyResponse::from_async(response, elapsed, None).await
+            PyResponse::from_async(response, elapsed, None, None).await
         })
     }
 

@@ -384,6 +384,34 @@ def test_custom_headers_per_request(server):
     assert data.get("x-my-header") == "hello"
 
 
+def test_client_default_encoding_applies_when_charset_missing(server):
+    with httprs.Client(default_encoding="latin-1") as client:
+        response = client.post(server.url + "/echo_body", content=b"\xe9")
+    assert response.status_code == 200
+    assert response.text == "é"
+
+
+def test_client_default_encoding_applies_for_decode_fallback():
+    class CharsetTransport:
+        def handle_request(self, request):
+            return httprs.Response(
+                200,
+                content=b"\xe9",
+                headers={"content-type": "text/plain; charset=utf-8"},
+                request=request,
+            )
+
+    with httprs.Client(
+        default_encoding="latin-1",
+        transport=CharsetTransport(),
+    ) as client:
+        request = client.build_request("GET", "https://example.com/")
+        response = client.send(request)
+
+    assert response.status_code == 200
+    assert response.text == "é"
+
+
 def test_raise_for_status(server):
     with httprs.Client() as client:
         for status_code in (200, 400, 404, 500, 505):

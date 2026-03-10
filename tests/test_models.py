@@ -195,6 +195,37 @@ class TestResponse:
         r = httprs.Response(200, content=b"Hello, world!")
         assert r.text == "Hello, world!"
 
+    def test_text_uses_default_encoding_when_charset_missing(self):
+        r = httprs.Response(
+            200,
+            content=b"\xe9",
+            headers={"content-type": "text/plain"},
+            default_encoding="latin-1",
+        )
+        assert r.text == "é"
+
+    def test_text_falls_back_to_default_encoding_on_decode_error(self):
+        r = httprs.Response(
+            200,
+            content=b"\xe9",
+            headers={"content-type": "text/plain; charset=utf-8"},
+            default_encoding="latin-1",
+        )
+        assert r.text == "é"
+
+    def test_text_uses_callable_default_encoding(self):
+        r = httprs.Response(
+            200,
+            content=b"\xe9",
+            headers={"content-type": "text/plain"},
+            default_encoding=lambda _content: "latin-1",
+        )
+        assert r.text == "é"
+
+    def test_default_encoding_rejects_invalid_type(self):
+        with pytest.raises(TypeError, match="default_encoding must be a string"):
+            httprs.Response(200, content=b"hello", default_encoding=123)
+
     def test_json(self):
         r = httprs.Response(200, content=b'{"key": "value", "num": 42}')
         data = r.json()
