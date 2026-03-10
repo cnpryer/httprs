@@ -509,6 +509,58 @@ async def test_async_client_rejects_mount_with_non_string_key():
 
 
 @pytest.mark.anyio
+async def test_async_client_request_event_hooks_apply_to_network_requests(server):
+    events = []
+
+    async def on_request(request):
+        events.append(("request", request.method))
+        request.set_header("x-event-hook", "async")
+
+    async def on_response(response):
+        events.append(("response", response.status_code))
+
+    async with httprs.AsyncClient(
+        event_hooks={"request": [on_request], "response": [on_response]}
+    ) as client:
+        response = await client.get(server.url + "/echo_headers")
+
+    assert response.status_code == 200
+    assert response.json().get("x-event-hook") == "async"
+    assert events == [("request", "GET"), ("response", 200)]
+
+
+@pytest.mark.anyio
+async def test_async_send_event_hooks_apply_to_mounted_transport():
+    events = []
+
+    class ApiTransport:
+        async def handle_async_request(self, request):
+            return httprs.Response(
+                217,
+                text=request.headers.get("x-event-hook", ""),
+                request=request,
+            )
+
+    async def on_request(request):
+        request.set_header("x-event-hook", "mounted-async")
+        events.append("request")
+
+    async def on_response(response):
+        events.append(("response", response.status_code, response.text))
+
+    async with httprs.AsyncClient(
+        event_hooks={"request": [on_request], "response": [on_response]},
+        mounts={"https://example.com/api/": ApiTransport()},
+    ) as client:
+        request = client.build_request("GET", "https://example.com/api/items")
+        response = await client.send(request)
+
+    assert response.status_code == 217
+    assert response.text == "mounted-async"
+    assert events == ["request", ("response", 217, "mounted-async")]
+
+
+@pytest.mark.anyio
 async def test_send_auth_argument_basic(server):
     async with httprs.AsyncClient() as client:
         request = client.build_request("GET", server.url + "/echo_headers")
