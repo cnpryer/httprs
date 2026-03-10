@@ -211,6 +211,86 @@ def test_send_uses_custom_transport():
     assert response.text == "from-transport"
 
 
+def test_send_mount_uses_matching_transport():
+    class FallbackTransport:
+        def handle_request(self, request):
+            return httprs.Response(207, text="fallback", request=request)
+
+    class ApiTransport:
+        def handle_request(self, request):
+            return httprs.Response(208, text="api", request=request)
+
+    with httprs.Client(
+        transport=FallbackTransport(),
+        mounts={"https://example.com/api/": ApiTransport()},
+    ) as client:
+        mounted_req = client.build_request("GET", "https://example.com/api/items")
+        fallback_req = client.build_request("GET", "https://example.org/api/items")
+        mounted_resp = client.send(mounted_req)
+        fallback_resp = client.send(fallback_req)
+
+    assert mounted_resp.status_code == 208
+    assert mounted_resp.text == "api"
+    assert fallback_resp.status_code == 207
+    assert fallback_resp.text == "fallback"
+
+
+def test_send_mount_uses_longest_matching_prefix():
+    class RootTransport:
+        def handle_request(self, request):
+            return httprs.Response(209, text="root", request=request)
+
+    class ApiTransport:
+        def handle_request(self, request):
+            return httprs.Response(210, text="api", request=request)
+
+    with httprs.Client(
+        mounts={
+            "https://example.com/": RootTransport(),
+            "https://example.com/api/": ApiTransport(),
+        }
+    ) as client:
+        api_req = client.build_request("GET", "https://example.com/api/items")
+        root_req = client.build_request("GET", "https://example.com/other")
+        api_resp = client.send(api_req)
+        root_resp = client.send(root_req)
+
+    assert api_resp.status_code == 210
+    assert api_resp.text == "api"
+    assert root_resp.status_code == 209
+    assert root_resp.text == "root"
+
+
+def test_send_mount_host_prefix_requires_boundary():
+    class HostTransport:
+        def handle_request(self, request):
+            return httprs.Response(211, text="host", request=request)
+
+    class FallbackTransport:
+        def handle_request(self, request):
+            return httprs.Response(212, text="fallback", request=request)
+
+    with httprs.Client(
+        transport=FallbackTransport(),
+        mounts={"https://example.com": HostTransport()},
+    ) as client:
+        request = client.build_request("GET", "https://example.com.evil/resource")
+        response = client.send(request)
+
+    assert response.status_code == 212
+    assert response.text == "fallback"
+
+
+def test_client_rejects_mount_with_none_transport():
+    with pytest.raises(TypeError, match="mount transport cannot be None"):
+        httprs.Client(mounts={"https://example.com/": None})
+
+
+def test_client_rejects_mount_with_non_string_key():
+    with pytest.raises(TypeError, match="mount keys must be strings"):
+        httprs.Client(mounts={1: object()})
+
+
 def test_send_auth_argument_basic(server):
     with httprs.Client() as client:
         request = client.build_request("GET", server.url + "/echo_headers")

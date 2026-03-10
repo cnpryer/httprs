@@ -424,6 +424,91 @@ async def test_send_prefers_handle_async_request_over_handle_request():
 
 
 @pytest.mark.anyio
+async def test_async_send_mount_uses_matching_transport():
+    class FallbackTransport:
+        def handle_request(self, request):
+            return httprs.Response(211, text="fallback", request=request)
+
+    class ApiTransport:
+        async def handle_async_request(self, request):
+            return httprs.Response(212, text="api", request=request)
+
+    async with httprs.AsyncClient(
+        transport=FallbackTransport(),
+        mounts={"https://example.com/api/": ApiTransport()},
+    ) as client:
+        mounted_req = client.build_request("GET", "https://example.com/api/items")
+        fallback_req = client.build_request("GET", "https://example.org/api/items")
+        mounted_resp = await client.send(mounted_req)
+        fallback_resp = await client.send(fallback_req)
+
+    assert mounted_resp.status_code == 212
+    assert mounted_resp.text == "api"
+    assert fallback_resp.status_code == 211
+    assert fallback_resp.text == "fallback"
+
+
+@pytest.mark.anyio
+async def test_async_send_mount_uses_longest_matching_prefix():
+    class RootTransport:
+        async def handle_async_request(self, request):
+            return httprs.Response(213, text="root", request=request)
+
+    class ApiTransport:
+        async def handle_async_request(self, request):
+            return httprs.Response(214, text="api", request=request)
+
+    async with httprs.AsyncClient(
+        mounts={
+            "https://example.com/": RootTransport(),
+            "https://example.com/api/": ApiTransport(),
+        }
+    ) as client:
+        api_req = client.build_request("GET", "https://example.com/api/items")
+        root_req = client.build_request("GET", "https://example.com/other")
+        api_resp = await client.send(api_req)
+        root_resp = await client.send(root_req)
+
+    assert api_resp.status_code == 214
+    assert api_resp.text == "api"
+    assert root_resp.status_code == 213
+    assert root_resp.text == "root"
+
+
+@pytest.mark.anyio
+async def test_async_send_mount_host_prefix_requires_boundary():
+    class HostTransport:
+        async def handle_async_request(self, request):
+            return httprs.Response(215, text="host", request=request)
+
+    class FallbackTransport:
+        def handle_request(self, request):
+            return httprs.Response(216, text="fallback", request=request)
+
+    async with httprs.AsyncClient(
+        transport=FallbackTransport(),
+        mounts={"https://example.com": HostTransport()},
+    ) as client:
+        request = client.build_request("GET", "https://example.com.evil/resource")
+        response = await client.send(request)
+
+    assert response.status_code == 216
+    assert response.text == "fallback"
+
+
+@pytest.mark.anyio
+async def test_async_client_rejects_mount_with_none_transport():
+    with pytest.raises(TypeError, match="mount transport cannot be None"):
+        httprs.AsyncClient(mounts={"https://example.com/": None})
+
+
+@pytest.mark.anyio
+async def test_async_client_rejects_mount_with_non_string_key():
+    with pytest.raises(TypeError, match="mount keys must be strings"):
+        httprs.AsyncClient(mounts={1: object()})
+
+
+@pytest.mark.anyio
 async def test_send_auth_argument_basic(server):
     async with httprs.AsyncClient() as client:
         request = client.build_request("GET", server.url + "/echo_headers")
