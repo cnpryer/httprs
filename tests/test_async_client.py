@@ -148,6 +148,54 @@ async def test_async_client_default_params_merged_for_build_request(server):
 
 
 @pytest.mark.anyio
+async def test_async_client_default_cookies_applied_to_requests(server):
+    async with httprs.AsyncClient(
+        cookies={"session": "abc", "theme": "dark"}
+    ) as client:
+        response = await client.get(server.url + "/echo_headers")
+
+    cookie_header = response.json().get("cookie", "")
+    cookie_parts = {part.strip() for part in cookie_header.split(";")}
+    assert {"session=abc", "theme=dark"} <= cookie_parts
+
+
+@pytest.mark.anyio
+async def test_async_client_default_cookies_allow_request_header_override(server):
+    async with httprs.AsyncClient(cookies={"session": "abc"}) as client:
+        response = await client.get(
+            server.url + "/echo_headers", headers={"cookie": "manual=1"}
+        )
+
+    assert response.json().get("cookie") == "manual=1"
+
+
+@pytest.mark.anyio
+async def test_async_send_applies_client_default_cookies(server):
+    async with httprs.AsyncClient(cookies=httprs.Cookies({"session": "abc"})) as client:
+        request = httprs.Request("GET", server.url + "/echo_headers")
+        response = await client.send(request)
+
+    assert response.json().get("cookie") == "session=abc"
+
+
+@pytest.mark.anyio
+async def test_async_client_default_cookies_are_origin_scoped(server):
+    alt_url = server.url.replace("127.0.0.1", "localhost", 1)
+    async with httprs.AsyncClient(cookies={"session": "abc"}) as client:
+        first = await client.get(server.url + "/echo_headers")
+        second = await client.get(alt_url + "/echo_headers")
+
+    assert first.json().get("cookie") == "session=abc"
+    assert second.json().get("cookie") is None
+
+
+@pytest.mark.anyio
+async def test_async_client_rejects_cookie_value_with_semicolon():
+    with pytest.raises(ValueError, match="cookie value contains invalid characters"):
+        httprs.AsyncClient(cookies={"session": "abc;admin=true"})
+
+
+@pytest.mark.anyio
 async def test_json_response(server):
     async with httprs.AsyncClient() as client:
         response = await client.get(server.url + "/json")
