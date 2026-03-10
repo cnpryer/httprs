@@ -124,6 +124,19 @@ pub fn parse_default_encoding_arg(
     ))
 }
 
+fn parse_history_arg(py: Python<'_>, history: Option<Py<PyAny>>) -> PyResult<Vec<Py<PyResponse>>> {
+    let Some(history) = history else {
+        return Ok(Vec::new());
+    };
+    let bound = history.bind(py);
+    if bound.is_none() {
+        return Ok(Vec::new());
+    }
+    bound
+        .extract::<Vec<Py<PyResponse>>>()
+        .map_err(|_| PyTypeError::new_err("history must be a list of Response objects or None"))
+}
+
 fn immediate_awaitable<'py>(py: Python<'py>, value: Py<PyAny>) -> PyResult<Bound<'py, PyAny>> {
     pyo3_async_runtimes::tokio::future_into_py(py, async move { Ok(value) })
 }
@@ -758,6 +771,7 @@ pub struct PyResponse {
     pub url: String,
     pub request: Option<Py<PyRequest>>,
     pub encoding: Option<String>,
+    pub history: Vec<Py<PyResponse>>,
     pub default_encoding: Option<Py<PyAny>>,
     pub extensions: Option<Py<PyAny>>,
     // Streaming: Some(response) while stream is unread, None after read.
@@ -890,6 +904,7 @@ impl PyResponse {
             url,
             request,
             encoding,
+            history: Vec::new(),
             default_encoding,
             extensions: None,
             stream: None,
@@ -921,6 +936,7 @@ impl PyResponse {
             url,
             request,
             encoding,
+            history: Vec::new(),
             default_encoding,
             extensions: None,
             stream: Some(Arc::new(Mutex::new(Some(ResponseStream::Blocking(resp))))),
@@ -958,6 +974,7 @@ impl PyResponse {
             url,
             request,
             encoding,
+            history: Vec::new(),
             default_encoding,
             extensions: None,
             stream: None,
@@ -990,6 +1007,7 @@ impl PyResponse {
             url,
             request,
             encoding,
+            history: Vec::new(),
             default_encoding,
             extensions: None,
             stream: Some(Arc::new(Mutex::new(Some(ResponseStream::Async(resp))))),
@@ -1036,7 +1054,7 @@ impl PyResponse {
         default_encoding: Option<Py<PyAny>>,
         http_version: Option<String>,
     ) -> PyResult<Self> {
-        let _ = history;
+        let history = parse_history_arg(py, history)?;
         let default_encoding = parse_default_encoding_arg(py, default_encoding)?;
         let reason_phrase = reqwest::StatusCode::from_u16(status_code)
             .ok()
@@ -1118,6 +1136,7 @@ impl PyResponse {
             url: String::new(),
             request,
             encoding,
+            history,
             default_encoding,
             extensions,
             stream: None,
@@ -1172,6 +1191,14 @@ impl PyResponse {
     #[getter]
     pub fn encoding(&self) -> Option<&str> {
         self.encoding.as_deref()
+    }
+
+    #[getter]
+    pub fn history(&self, py: Python<'_>) -> Vec<Py<PyResponse>> {
+        self.history
+            .iter()
+            .map(|response| response.clone_ref(py))
+            .collect()
     }
 
     #[getter]
