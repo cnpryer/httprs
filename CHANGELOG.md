@@ -11,6 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.0.1a6] - 2026-03-09
 
+- Implement Response.history (#27)
+- Implement client default_encoding (#26)
+- Implement client event_hooks flow (#25)
+- Implement mount transport routing (#24)
+- Implement client cert flow (#23)
+- Implement client cookie flow (#22)
+- Implement client parameter flow (#21)
+
+## [0.0.1a6] - 2026-03-09
+
 - Use basic json_dumps (#20)
 - Extract basic auth for client requests (#19)
 
