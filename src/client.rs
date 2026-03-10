@@ -7,6 +7,8 @@ use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyByteArray, PyBytes, PyDict, PyList, PyTuple};
 use std::collections::HashSet;
+use std::error::Error as StdError;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -686,6 +688,73 @@ fn parse_proxy_arg(py: Python<'_>, proxy: Option<Py<PyAny>>) -> PyResult<Option<
     Err(PyTypeError::new_err("proxy must be a str, Proxy, or None"))
 }
 
+fn extract_path_like(bound: &Bound<'_, PyAny>) -> PyResult<PathBuf> {
+    bound.extract::<PathBuf>()
+}
+
+fn read_cert_file(path: &Path) -> PyResult<Vec<u8>> {
+    std::fs::read(path).map_err(|e| {
+        PyValueError::new_err(format!(
+            "failed to read client cert file '{}': {e}",
+            path.display()
+        ))
+    })
+}
+
+fn parse_cert_arg(py: Python<'_>, cert: Option<Py<PyAny>>) -> PyResult<Option<reqwest::Identity>> {
+    let Some(cert) = cert else {
+        return Ok(None);
+    };
+    let bound = cert.bind(py);
+    if bound.is_none() {
+        return Ok(None);
+    }
+
+    let mut pem = if let Ok(bytes) = bound.cast::<PyBytes>() {
+        bytes.as_bytes().to_vec()
+    } else if let Ok(bytes) = bound.cast::<PyByteArray>() {
+        bytes.to_vec()
+    } else if let Ok(tuple) = bound.cast::<PyTuple>() {
+        if tuple.len() != 2 {
+            return Err(PyTypeError::new_err(
+                "cert tuple must be (cert_file, key_file)",
+            ));
+        }
+        let cert_path = extract_path_like(&tuple.get_item(0)?)?;
+        let key_path = extract_path_like(&tuple.get_item(1)?)?;
+        let mut pem = read_cert_file(&cert_path)?;
+        if !pem.ends_with(b"\n") {
+            pem.push(b'\n');
+        }
+        pem.extend(read_cert_file(&key_path)?);
+        pem
+    } else if let Ok(list) = bound.cast::<PyList>() {
+        if list.len() != 2 {
+            return Err(PyTypeError::new_err(
+                "cert list must be [cert_file, key_file]",
+            ));
+        }
+        let cert_path = extract_path_like(&list.get_item(0)?)?;
+        let key_path = extract_path_like(&list.get_item(1)?)?;
+        let mut pem = read_cert_file(&cert_path)?;
+        if !pem.ends_with(b"\n") {
+            pem.push(b'\n');
+        }
+        pem.extend(read_cert_file(&key_path)?);
+        pem
+    } else {
+        let cert_path = extract_path_like(bound)?;
+        read_cert_file(&cert_path)?
+    };
+
+    let identity = reqwest::Identity::from_pem(&pem);
+    // Clear temporary key material as soon as reqwest has parsed it.
+    pem.fill(0);
+    let identity =
+        identity.map_err(|e| PyValueError::new_err(format!("invalid client certificate: {e}")))?;
+    Ok(Some(identity))
+}
+
 fn parse_verify_arg(py: Python<'_>, verify: Option<Py<PyAny>>) -> bool {
     let Some(verify) = verify else {
         return true;
@@ -745,6 +814,16 @@ fn make_redirect_policy(
     }
 }
 
+fn format_reqwest_builder_error(err: reqwest::Error) -> String {
+    let mut parts = vec![err.to_string()];
+    let mut source = err.source();
+    while let Some(next) = source {
+        parts.push(next.to_string());
+        source = next.source();
+    }
+    parts.join(": ")
+}
+
 fn build_blocking_client(
     py_timeout: &PyTimeout,
     follow_redirects: bool,
@@ -752,10 +831,16 @@ fn build_blocking_client(
     max_redirects: usize,
     trust_env: bool,
     verify: bool,
+    cert_identity: Option<&reqwest::Identity>,
     proxy: Option<&str>,
     limits: &PyLimits,
     cookie_jar: Arc<reqwest::cookie::Jar>,
 ) -> PyResult<reqwest::blocking::Client> {
+    if !verify && cert_identity.is_some() {
+        return Err(PyValueError::new_err(
+            "cert cannot be used when verify=False",
+        ));
+    }
     let redirect_policy =
         make_redirect_policy(follow_redirects, block_private_redirects, max_redirects);
     let mut client_builder = reqwest::blocking::Client::builder()
@@ -768,6 +853,9 @@ fn build_blocking_client(
     if !verify {
         client_builder = client_builder.danger_accept_invalid_certs(true);
     }
+    if let Some(identity) = cert_identity {
+        client_builder = client_builder.identity(identity.clone());
+    }
     if let Some(proxy_url) = proxy {
         let reqwest_proxy =
             reqwest::Proxy::all(proxy_url).map_err(|e| PyValueError::new_err(e.to_string()))?;
@@ -785,7 +873,7 @@ fn build_blocking_client(
 
     client_builder
         .build()
-        .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+        .map_err(|e| PyRuntimeError::new_err(format_reqwest_builder_error(e)))
 }
 
 fn build_async_client(
@@ -795,10 +883,16 @@ fn build_async_client(
     max_redirects: usize,
     trust_env: bool,
     verify: bool,
+    cert_identity: Option<&reqwest::Identity>,
     proxy: Option<&str>,
     limits: &PyLimits,
     cookie_jar: Arc<reqwest::cookie::Jar>,
 ) -> PyResult<reqwest::Client> {
+    if !verify && cert_identity.is_some() {
+        return Err(PyValueError::new_err(
+            "cert cannot be used when verify=False",
+        ));
+    }
     let redirect_policy =
         make_redirect_policy(follow_redirects, block_private_redirects, max_redirects);
     let mut client_builder = reqwest::Client::builder()
@@ -811,6 +905,9 @@ fn build_async_client(
     if !verify {
         client_builder = client_builder.danger_accept_invalid_certs(true);
     }
+    if let Some(identity) = cert_identity {
+        client_builder = client_builder.identity(identity.clone());
+    }
     if let Some(proxy_url) = proxy {
         let reqwest_proxy =
             reqwest::Proxy::all(proxy_url).map_err(|e| PyValueError::new_err(e.to_string()))?;
@@ -828,7 +925,7 @@ fn build_async_client(
 
     client_builder
         .build()
-        .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+        .map_err(|e| PyRuntimeError::new_err(format_reqwest_builder_error(e)))
 }
 
 #[pyclass(name = "Client", subclass)]
@@ -838,6 +935,7 @@ pub struct PyClient {
     default_query: Option<String>,
     cookie_jar: Arc<reqwest::cookie::Jar>,
     cookie_state: Arc<Mutex<CookieBindingState>>,
+    cert_identity: Option<reqwest::Identity>,
     default_headers: PyHeaders,
     timeout: PyTimeout,
     follow_redirects: bool,
@@ -928,12 +1026,12 @@ impl PyClient {
         default_encoding: Option<Py<PyAny>>,
         block_private_redirects: bool,
     ) -> PyResult<Self> {
-        let _ = cert;
         let _ = mounts;
         let _ = event_hooks;
         let _ = default_encoding;
         let default_query = params_to_query(py, params)?;
         let cookie_pairs = parse_cookies_arg(py, cookies)?;
+        let cert_identity = parse_cert_arg(py, cert)?;
         let cookie_jar = Arc::new(reqwest::cookie::Jar::default());
         let cookie_state = Arc::new(Mutex::new(CookieBindingState {
             pending_pairs: cookie_pairs,
@@ -977,6 +1075,7 @@ impl PyClient {
             max_redirects,
             trust_env,
             verify,
+            cert_identity.as_ref(),
             proxy.as_deref(),
             &limits,
             cookie_jar.clone(),
@@ -988,6 +1087,7 @@ impl PyClient {
             default_query,
             cookie_jar,
             cookie_state,
+            cert_identity,
             default_headers,
             timeout: py_timeout,
             follow_redirects,
@@ -1074,6 +1174,7 @@ impl PyClient {
                 self.max_redirects,
                 self.trust_env,
                 self.verify,
+                self.cert_identity.as_ref(),
                 self.proxy.as_deref(),
                 &self.limits,
                 self.cookie_jar.clone(),
@@ -1632,6 +1733,7 @@ impl PyClient {
                 this.max_redirects,
                 this.trust_env,
                 this.verify,
+                this.cert_identity.as_ref(),
                 this.proxy.as_deref(),
                 &this.limits,
                 this.cookie_jar.clone(),
@@ -1724,6 +1826,7 @@ impl PyClient {
 
     pub fn close(&mut self) {
         self.inner = None;
+        self.cert_identity = None;
     }
 
     #[getter]
@@ -1843,6 +1946,7 @@ pub struct PyAsyncClient {
     default_query: Option<String>,
     cookie_jar: Arc<reqwest::cookie::Jar>,
     cookie_state: Arc<Mutex<CookieBindingState>>,
+    cert_identity: Option<reqwest::Identity>,
     default_headers: PyHeaders,
     timeout: PyTimeout,
     follow_redirects: bool,
@@ -1980,12 +2084,12 @@ impl PyAsyncClient {
         default_encoding: Option<Py<PyAny>>,
         block_private_redirects: bool,
     ) -> PyResult<Self> {
-        let _ = cert;
         let _ = mounts;
         let _ = event_hooks;
         let _ = default_encoding;
         let default_query = params_to_query(py, params)?;
         let cookie_pairs = parse_cookies_arg(py, cookies)?;
+        let cert_identity = parse_cert_arg(py, cert)?;
         let cookie_jar = Arc::new(reqwest::cookie::Jar::default());
         let cookie_state = Arc::new(Mutex::new(CookieBindingState {
             pending_pairs: cookie_pairs,
@@ -2028,6 +2132,7 @@ impl PyAsyncClient {
             max_redirects,
             trust_env,
             verify,
+            cert_identity.as_ref(),
             proxy.as_deref(),
             &limits,
             cookie_jar.clone(),
@@ -2039,6 +2144,7 @@ impl PyAsyncClient {
             default_query,
             cookie_jar,
             cookie_state,
+            cert_identity,
             default_headers,
             timeout: py_timeout,
             follow_redirects,
@@ -2576,6 +2682,7 @@ impl PyAsyncClient {
                 this.max_redirects,
                 this.trust_env,
                 this.verify,
+                this.cert_identity.as_ref(),
                 this.proxy.as_deref(),
                 &this.limits,
                 this.cookie_jar.clone(),
@@ -2628,10 +2735,12 @@ impl PyAsyncClient {
 
     pub fn close(&mut self) {
         self.inner = None;
+        self.cert_identity = None;
     }
 
     pub fn aclose<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         self.inner = None;
+        self.cert_identity = None;
         immediate_awaitable(py, py.None())
     }
 

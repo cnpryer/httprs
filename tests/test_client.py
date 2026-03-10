@@ -348,6 +348,105 @@ def test_client_closed_raises(server):
         client.get(server.url)
 
 
+def test_client_invalid_cert_pem_raises():
+    with pytest.raises(ValueError, match="invalid client certificate"):
+        httprs.Client(cert=b"not-a-valid-pem")
+
+
+def test_client_missing_cert_file_raises():
+    with pytest.raises(ValueError, match="failed to read client cert file"):
+        httprs.Client(cert=str(_INPUT_DIR / "missing-client-cert.pem"))
+
+
+def test_client_accepts_cert_with_combined_pem_bytes(server, mtls_server):
+    with httprs.Client(cert=mtls_server.client_pem.read_bytes()) as client:
+        response = client.get(server.url)
+
+    assert response.status_code == 200
+    assert response.text == "Hello, world!"
+
+
+def test_client_accepts_cert_with_pathlike_cert_file(server, mtls_server):
+    with httprs.Client(cert=mtls_server.client_pem) as client:
+        response = client.get(server.url)
+
+    assert response.status_code == 200
+    assert response.text == "Hello, world!"
+
+
+def test_client_accepts_cert_with_cert_key_tuple(server, mtls_server):
+    with httprs.Client(
+        cert=(mtls_server.client_cert, mtls_server.client_key)
+    ) as client:
+        response = client.get(server.url)
+
+    assert response.status_code == 200
+    assert response.text == "Hello, world!"
+
+
+def test_client_accepts_cert_with_cert_key_list(server, mtls_server):
+    with httprs.Client(
+        cert=[mtls_server.client_cert, mtls_server.client_key]
+    ) as client:
+        response = client.get(server.url)
+
+    assert response.status_code == 200
+    assert response.text == "Hello, world!"
+
+
+def test_client_rejects_cert_with_verify_disabled_bytes(mtls_server):
+    with pytest.raises(ValueError, match="cert cannot be used when verify=False"):
+        httprs.Client(cert=mtls_server.client_pem.read_bytes(), verify=False)
+
+
+def test_client_rejects_cert_with_verify_disabled_pathlike(mtls_server):
+    with pytest.raises(ValueError, match="cert cannot be used when verify=False"):
+        httprs.Client(cert=mtls_server.client_pem, verify=False)
+
+
+def test_client_rejects_cert_with_verify_disabled_tuple(mtls_server):
+    with pytest.raises(ValueError, match="cert cannot be used when verify=False"):
+        httprs.Client(
+            cert=(mtls_server.client_cert, mtls_server.client_key), verify=False
+        )
+
+
+def test_client_rejects_cert_with_verify_disabled_list(mtls_server):
+    with pytest.raises(ValueError, match="cert cannot be used when verify=False"):
+        httprs.Client(
+            cert=[mtls_server.client_cert, mtls_server.client_key], verify=False
+        )
+
+
+def test_client_mtls_without_cert_fails_connect(mtls_server):
+    with httprs.Client(verify=False) as client:
+        with pytest.raises(httprs.RequestError):
+            client.get(mtls_server.url)
+
+
+def test_client_cert_does_not_bypass_server_verification(mtls_server):
+    with httprs.Client(cert=mtls_server.client_pem) as client:
+        with pytest.raises(httprs.RequestError):
+            client.get(mtls_server.url)
+
+
+def test_client_request_follow_redirect_override_preserves_cert(server, mtls_server):
+    with httprs.Client(cert=mtls_server.client_pem, follow_redirects=False) as client:
+        response = client.get(server.url + "/redirect_301", follow_redirects=True)
+
+    assert response.status_code == 200
+    assert response.text == "Hello, world!"
+
+
+def test_client_send_follow_redirect_override_preserves_cert(server, mtls_server):
+    with httprs.Client(cert=mtls_server.client_pem, follow_redirects=False) as client:
+        request = client.build_request("GET", server.url + "/redirect_301")
+        response = client.send(request, follow_redirects=True)
+
+    assert response.status_code == 200
+    assert response.text == "Hello, world!"
+
+
 def test_subclass_super_init_kwargs(server):
     class WrappedClient(httprs.Client):
         def __init__(self, **kwargs):

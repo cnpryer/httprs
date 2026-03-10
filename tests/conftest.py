@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
+from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
+import pathlib
+import shutil
+import ssl
+import subprocess
 import threading
 import time
 import typing
@@ -287,3 +293,316 @@ def server() -> typing.Iterator[TestServer]:
     config = Config(app=app, host="127.0.0.1", port=0, lifespan="off", loop="asyncio")
     test_server = TestServer(config=config)
     yield from serve_in_thread(test_server)
+
+
+def _run_openssl(args: list[str], cwd: pathlib.Path) -> None:
+    try:
+        subprocess.run(
+            ["openssl", *args],
+            cwd=cwd,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError:
+        pytest.skip("openssl is required for mTLS integration tests")
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(
+            "openssl command failed:\n"
+            f"  openssl {' '.join(args)}\n"
+            f"  stdout: {exc.stdout.strip()}\n"
+            f"  stderr: {exc.stderr.strip()}"
+        ) from exc
+
+
+def _write_x509_extensions(path: pathlib.Path) -> pathlib.Path:
+    extfile = path / "x509_extensions.cnf"
+    extfile.write_text(
+        "\n".join([
+            "[v3_server]",
+            "basicConstraints = critical,CA:FALSE",
+            "keyUsage = critical,digitalSignature,keyEncipherment",
+            "extendedKeyUsage = serverAuth",
+            "subjectAltName = IP:127.0.0.1,DNS:localhost",
+            "subjectKeyIdentifier = hash",
+            "authorityKeyIdentifier = keyid,issuer",
+            "",
+            "[v3_client]",
+            "basicConstraints = critical,CA:FALSE",
+            "keyUsage = critical,digitalSignature,keyEncipherment",
+            "extendedKeyUsage = clientAuth",
+            "subjectKeyIdentifier = hash",
+            "authorityKeyIdentifier = keyid,issuer",
+            "",
+        ]),
+        encoding="utf-8",
+    )
+    return extfile
+
+
+@dataclass
+class MtlsAssets:
+    ca_cert: pathlib.Path
+    server_cert: pathlib.Path
+    server_key: pathlib.Path
+    client_cert: pathlib.Path
+    client_key: pathlib.Path
+    client_pem: pathlib.Path
+    bad_client_cert: pathlib.Path
+    bad_client_key: pathlib.Path
+    bad_client_pem: pathlib.Path
+
+
+def _generate_mtls_assets(base: pathlib.Path) -> MtlsAssets:
+    extfile = _write_x509_extensions(base)
+    ca_key = base / "ca.key"
+    ca_cert = base / "ca.crt"
+    _run_openssl(
+        [
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-keyout",
+            str(ca_key),
+            "-out",
+            str(ca_cert),
+            "-days",
+            "1",
+            "-nodes",
+            "-subj",
+            "/CN=httprs-test-ca",
+        ],
+        base,
+    )
+
+    server_key = base / "server.key"
+    server_csr = base / "server.csr"
+    server_cert = base / "server.crt"
+    _run_openssl(
+        [
+            "req",
+            "-newkey",
+            "rsa:2048",
+            "-keyout",
+            str(server_key),
+            "-out",
+            str(server_csr),
+            "-nodes",
+            "-subj",
+            "/CN=localhost",
+        ],
+        base,
+    )
+    _run_openssl(
+        [
+            "x509",
+            "-req",
+            "-in",
+            str(server_csr),
+            "-CA",
+            str(ca_cert),
+            "-CAkey",
+            str(ca_key),
+            "-CAcreateserial",
+            "-out",
+            str(server_cert),
+            "-days",
+            "1",
+            "-sha256",
+            "-set_serial",
+            "1001",
+            "-extfile",
+            str(extfile),
+            "-extensions",
+            "v3_server",
+        ],
+        base,
+    )
+
+    client_key = base / "client.key"
+    client_csr = base / "client.csr"
+    client_cert = base / "client.crt"
+    _run_openssl(
+        [
+            "req",
+            "-newkey",
+            "rsa:2048",
+            "-keyout",
+            str(client_key),
+            "-out",
+            str(client_csr),
+            "-nodes",
+            "-subj",
+            "/CN=httprs-client",
+        ],
+        base,
+    )
+    _run_openssl(
+        [
+            "x509",
+            "-req",
+            "-in",
+            str(client_csr),
+            "-CA",
+            str(ca_cert),
+            "-CAkey",
+            str(ca_key),
+            "-CAcreateserial",
+            "-out",
+            str(client_cert),
+            "-days",
+            "1",
+            "-sha256",
+            "-set_serial",
+            "1002",
+            "-extfile",
+            str(extfile),
+            "-extensions",
+            "v3_client",
+        ],
+        base,
+    )
+    client_pem = base / "client.pem"
+    client_pem.write_bytes(client_cert.read_bytes() + b"\n" + client_key.read_bytes())
+
+    bad_ca_key = base / "bad_ca.key"
+    bad_ca_cert = base / "bad_ca.crt"
+    _run_openssl(
+        [
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-keyout",
+            str(bad_ca_key),
+            "-out",
+            str(bad_ca_cert),
+            "-days",
+            "1",
+            "-nodes",
+            "-subj",
+            "/CN=httprs-bad-ca",
+        ],
+        base,
+    )
+    bad_client_key = base / "bad_client.key"
+    bad_client_csr = base / "bad_client.csr"
+    bad_client_cert = base / "bad_client.crt"
+    _run_openssl(
+        [
+            "req",
+            "-newkey",
+            "rsa:2048",
+            "-keyout",
+            str(bad_client_key),
+            "-out",
+            str(bad_client_csr),
+            "-nodes",
+            "-subj",
+            "/CN=httprs-bad-client",
+        ],
+        base,
+    )
+    _run_openssl(
+        [
+            "x509",
+            "-req",
+            "-in",
+            str(bad_client_csr),
+            "-CA",
+            str(bad_ca_cert),
+            "-CAkey",
+            str(bad_ca_key),
+            "-CAcreateserial",
+            "-out",
+            str(bad_client_cert),
+            "-days",
+            "1",
+            "-sha256",
+            "-set_serial",
+            "2001",
+            "-extfile",
+            str(extfile),
+            "-extensions",
+            "v3_client",
+        ],
+        base,
+    )
+    bad_client_pem = base / "bad_client.pem"
+    bad_client_pem.write_bytes(
+        bad_client_cert.read_bytes() + b"\n" + bad_client_key.read_bytes()
+    )
+
+    return MtlsAssets(
+        ca_cert=ca_cert,
+        server_cert=server_cert,
+        server_key=server_key,
+        client_cert=client_cert,
+        client_key=client_key,
+        client_pem=client_pem,
+        bad_client_cert=bad_client_cert,
+        bad_client_key=bad_client_key,
+        bad_client_pem=bad_client_pem,
+    )
+
+
+@dataclass
+class MtlsServer:
+    url: str
+    client_cert: pathlib.Path
+    client_key: pathlib.Path
+    client_pem: pathlib.Path
+    bad_client_cert: pathlib.Path
+    bad_client_key: pathlib.Path
+    bad_client_pem: pathlib.Path
+
+
+@pytest.fixture(scope="session")
+def mtls_server(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> typing.Iterator[MtlsServer]:
+    if shutil.which("openssl") is None:
+        pytest.skip("openssl is required for mTLS integration tests")
+    assets = _generate_mtls_assets(tmp_path_factory.mktemp("mtls"))
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path.startswith("/redirect_301"):
+                self.send_response(301)
+                self.send_header("location", "/")
+                self.send_header("content-length", "0")
+                self.end_headers()
+                return
+            body = b"mtls-ok"
+            self.send_response(200)
+            self.send_header("content-type", "text/plain")
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            pass
+
+    httpd = HTTPServer(("127.0.0.1", 0), Handler)
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(str(assets.server_cert), str(assets.server_key))
+    context.verify_mode = ssl.CERT_REQUIRED
+    context.load_verify_locations(cafile=str(assets.ca_cert))
+    httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
+    port = httpd.server_address[1]
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield MtlsServer(
+            url=f"https://127.0.0.1:{port}",
+            client_cert=assets.client_cert,
+            client_key=assets.client_key,
+            client_pem=assets.client_pem,
+            bad_client_cert=assets.bad_client_cert,
+            bad_client_key=assets.bad_client_key,
+            bad_client_pem=assets.bad_client_pem,
+        )
+    finally:
+        httpd.shutdown()
+        thread.join(timeout=5.0)
