@@ -2396,6 +2396,7 @@ async fn convert_async_response(
         url,
         request,
         encoding,
+        history: Vec::new(),
         default_encoding,
         extensions: None,
         stream: None,

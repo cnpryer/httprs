@@ -195,6 +195,36 @@ class TestResponse:
         r = httprs.Response(200, content=b"Hello, world!")
         assert r.text == "Hello, world!"
 
+    def test_history_defaults_to_empty_list(self):
+        r = httprs.Response(200, content=b"ok")
+        assert r.history == []
+
+    def test_history_accepts_response_list(self):
+        redirect = httprs.Response(
+            301,
+            headers={"location": "https://example.com/final"},
+            content=b"",
+        )
+        final = httprs.Response(200, content=b"ok", history=[redirect])
+        history = final.history
+        assert len(history) == 1
+        assert history[0].status_code == 301
+        assert history[0].headers["location"] == "https://example.com/final"
+
+    def test_history_copied_from_input_list(self):
+        redirect1 = httprs.Response(301, content=b"")
+        redirect2 = httprs.Response(302, content=b"")
+        history = [redirect1]
+        final = httprs.Response(200, content=b"ok", history=history)
+        history.append(redirect2)
+        assert [r.status_code for r in final.history] == [301]
+
+    def test_history_rejects_invalid_items(self):
+        with pytest.raises(
+            TypeError, match="history must be a list of Response objects"
+        ):
+            httprs.Response(200, content=b"ok", history=["not-a-response"])
+
     def test_text_uses_default_encoding_when_charset_missing(self):
         r = httprs.Response(
             200,
